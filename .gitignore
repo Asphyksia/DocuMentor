@@ -1,0 +1,33 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Data (user-generated, don't commit)
+dashboard/data/*.json
+workspace/memory/*.json
+workspace/memory/*.md
+workspace/documents/*
+!workspace/documents/.gitkeep
+!workspace/memory/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
