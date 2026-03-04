@@ -1,4 +1,4 @@
-# 📄 Doc Intelligence Bot
+# 📄 DocuMentor
 
 Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en lenguaje natural y visualiza los datos en un dashboard interactivo.
 
@@ -17,7 +17,7 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 ### Opción 1: Un solo comando (recomendado)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Asphyksia/doc-intelligence-bot/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash
 ```
 
 El instalador:
@@ -34,8 +34,8 @@ El instalador:
 curl -fsSL https://openclaw.ai/install.sh | bash
 
 # 2. Clonar este repo
-git clone https://github.com/Asphyksia/doc-intelligence-bot.git
-cd doc-intelligence-bot
+git clone https://github.com/Asphyksia/DocuMentor.git
+cd DocuMentor
 
 # 3. Ejecutar setup
 ./install.sh
@@ -51,7 +51,7 @@ cd doc-intelligence-bot
 ## Dashboard
 
 ```bash
-cd ~/doc-intelligence-bot
+cd ~/DocuMentor
 streamlit run dashboard/app.py
 ```
 
@@ -72,7 +72,7 @@ Estimación: **~€5-15/mes** para uso moderado (500 consultas/día).
 ## Estructura
 
 ```
-doc-intelligence-bot/
+DocuMentor/
 ├── install.sh                  # Instalador todo-en-uno
 ├── workspace/
 │   ├── SOUL.md                 # Personalidad + onboarding
@@ -99,7 +99,7 @@ doc-intelligence-bot/
 openclaw update
 
 # Actualizar el workspace (este repo)
-cd ~/doc-intelligence-bot
+cd ~/DocuMentor
 git pull
 ./install.sh
 ```
@@ -131,4 +131,4 @@ MIT
 
 ---
 
-**Inteligencia documental accesible para todos** 📄
+**DocuMentor — Inteligencia documental accesible para todos** 📄

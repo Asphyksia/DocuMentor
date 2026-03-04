@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ─────────────────────────────────────────────────────────
-#  Doc Intelligence Bot — One-Command Installer
+#  DocuMentor — One-Command Installer
 #  Installs OpenClaw (if needed) + custom workspace
 # ─────────────────────────────────────────────────────────
 
@@ -15,15 +15,15 @@ warn()    { echo -e "${YELLOW}⚠ ${NC}$1"; }
 error()   { echo -e "${RED}✗ ${NC}$1"; exit 1; }
 header()  { echo -e "\n${BOLD}$1${NC}\n"; }
 
-REPO_URL="https://github.com/Asphyksia/doc-intelligence-bot.git"
-INSTALL_DIR="${HOME}/doc-intelligence-bot"
+REPO_URL="https://github.com/Asphyksia/DocuMentor.git"
+INSTALL_DIR="${HOME}/DocuMentor"
 OPENCLAW_CONFIG_DIR="${HOME}/.openclaw"
 OPENCLAW_WORKSPACE="${OPENCLAW_CONFIG_DIR}/workspace"
 
 # ── Banner ──────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔═══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║  📄 Doc Intelligence Bot — Instalador         ║${NC}"
+echo -e "${BOLD}║  📄 DocuMentor — Instalador                   ║${NC}"
 echo -e "${BOLD}║  Inteligencia documental con IA               ║${NC}"
 echo -e "${BOLD}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
@@ -302,6 +302,8 @@ echo ""
 echo "  📄 Workspace:  $OPENCLAW_WORKSPACE"
 echo "  ⚙️  Config:     $CONFIG_FILE"
 echo "  📊 Dashboard:  cd $INSTALL_DIR && streamlit run dashboard/app.py"
+echo ""
+echo "  🎓 DocuMentor está listo."
 echo ""
 
 if [[ -n "${CHANNEL:-}" ]]; then

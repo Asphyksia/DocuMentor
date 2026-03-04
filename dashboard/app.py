@@ -13,7 +13,7 @@ from datetime import datetime
 # ── Config ──────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent / "data"
 st.set_page_config(
-    page_title="📄 Document Intelligence",
+    page_title="📄 DocuMentor",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -38,7 +38,7 @@ def load_tables():
 
 # ── Sidebar ─────────────────────────────────────────────
 with st.sidebar:
-    st.title("📄 Document Intelligence")
+    st.title("📄 DocuMentor")
     st.markdown("---")
 
     documents = load_documents()
@@ -55,11 +55,11 @@ with st.sidebar:
             st.text(f"  {fmt} · {name}")
 
     st.markdown("---")
-    st.caption("Powered by OpenClaw + OpenGPU")
+    st.caption("DocuMentor · Powered by OpenClaw + OpenGPU")
 
 # ── Main Content ────────────────────────────────────────
 if not documents:
-    st.title("📄 Document Intelligence Dashboard")
+    st.title("📄 DocuMentor Dashboard")
     st.info(
         "👋 No hay documentos procesados todavía.\n\n"
         "Sube un documento a través del chat y aparecerá aquí automáticamente."
