@@ -2,14 +2,20 @@
 
 ## RAG Backend
 
-El backend de búsqueda semántica se configura automáticamente:
+Búsqueda semántica con **ChromaDB** (almacenamiento vectorial local).
 
-- **QMD** — Si hay GPU NVIDIA con ≥6GB VRAM (búsqueda vectorial, más rápido)
-- **dotMD** — Si no hay GPU (CPU, más portable)
+- Funciona en CPU sin problemas (usa embeddings all-MiniLM-L6-v2 via onnxruntime)
+- GPU NVIDIA opcional (acelera embeddings si está disponible)
+- Almacenamiento persistente en `memory/chromadb/`
+- Config guardada en `memory/config.json` bajo `rag_backend`
 
-El backend elegido se guarda en `memory/config.json` bajo `rag_backend`.
+### Scripts
+- `skills/rag-search/scripts/setup_rag.py` — Inicializar ChromaDB
+- `skills/rag-search/scripts/index.py` — Indexar documentos
+- `skills/rag-search/scripts/search.py` — Buscar en documentos
+- `skills/rag-search/scripts/manage.py` — Gestionar índice (list/remove/reindex/stats)
 
 ## Dashboard
 
 - **URL**: http://localhost:8501 (Streamlit)
-- Se lanza automáticamente con el sistema
+- Se lanza con: `cd ~/DocuMentor && streamlit run dashboard/app.py`

@@ -13,7 +13,7 @@ Si `memory/config.json` no existe, es un usuario nuevo. Ejecuta el onboarding de
 ## Skills disponibles
 
 - **doc-ingest** — Procesar documentos: PDF, Excel, Word, CSV. Extrae texto, tablas, datos.
-- **rag-search** — Búsqueda semántica sobre documentos procesados (QMD o dotMD).
+- **rag-search** — Búsqueda semántica sobre documentos procesados (ChromaDB).
 - **dashboard** — Visualización de datos con Streamlit.
 
 ## Documentos

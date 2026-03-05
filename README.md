@@ -7,7 +7,7 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 ## Qué hace
 
 - **📝 Procesa documentos**: PDF, Excel, Word, CSV
-- **🔍 Búsqueda semántica**: Preguntas en lenguaje natural sobre tus documentos
+- **🔍 Búsqueda semántica**: Preguntas en lenguaje natural sobre tus documentos (ChromaDB)
 - **📊 Dashboard visual**: Gráficos, tablas y exploración interactiva
 - **🤖 IA adaptable**: Se configura según tus preferencias en el primer uso
 - **🔒 Privacidad**: Todo local, tus datos nunca salen de tu máquina
@@ -82,7 +82,7 @@ DocuMentor/
 │   ├── HEARTBEAT.md
 │   ├── skills/
 │   │   ├── doc-ingest/         # Procesamiento de documentos
-│   │   ├── rag-search/         # Búsqueda semántica (QMD/dotMD)
+│   │   ├── rag-search/         # Búsqueda semántica (ChromaDB)
 │   │   └── dashboard/          # Visualización de datos
 │   ├── memory/                 # Config de usuario + datos
 │   └── documents/              # Documentos subidos
@@ -117,7 +117,7 @@ Tu configuración y documentos no se pierden al actualizar.
 
 - Node.js 22+ (el instalador lo maneja)
 - Python 3.10+
-- GPU NVIDIA (opcional, mejora la búsqueda semántica)
+- GPU NVIDIA (opcional, acelera los embeddings de búsqueda)
 
 ## Links
 

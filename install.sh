@@ -388,7 +388,7 @@ fi
 header "6/6 · Instalando dependencias y arrancando..."
 
 # Install Python dependencies
-PYTHON_DEPS="pdfplumber openpyxl python-docx matplotlib streamlit pandas"
+PYTHON_DEPS="chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas"
 PIP_INSTALLED=false
 
 if command -v pip3 &>/dev/null; then
