@@ -19,31 +19,30 @@
 
 ## Flujo 1: Usuario sube un documento
 
-Cuando recibes un archivo, ejecuta estos pasos en orden:
+Cuando recibes un archivo, ejecuta **UN solo comando** que hace todo automáticamente:
+
+```bash
+python3 skills/doc-ingest/scripts/process_document.py <archivo>
+```
+
+Este script ejecuta todo el pipeline en orden:
+1. Extrae el contenido (texto, tablas, datos)
+2. Escanea por seguridad (prompt injection)
+3. Indexa en ChromaDB (búsqueda semántica)
+4. Actualiza el dashboard
+
+Al final imprime una línea `RESULT_JSON:{...}` con el resumen. Usa esos datos para confirmar al usuario:
 
 ```
-PASO 1 — Extraer contenido
-  python3 skills/doc-ingest/scripts/extract.py <archivo> memory/documents/<nombre>.json
-
-PASO 2 — Escanear seguridad
-  python3 skills/prompt-guard/scripts/scan_document.py memory/documents/<nombre>.json
-  → Si hay amenazas: avisa al usuario, NO indexes los chunks flaggeados
-  → Si está limpio: continúa
-
-PASO 3 — Indexar en ChromaDB
-  python3 skills/rag-search/scripts/index.py memory/documents/<nombre>.json
-
-PASO 4 — Actualizar dashboard
-  python3 skills/dashboard/scripts/update_dashboard.py
-
-PASO 5 — Confirmar al usuario
-  Ejemplo: "He procesado informe.pdf: 15 páginas, 3 tablas. 
-  Prueba a preguntarme algo, por ejemplo: '¿Cuáles son los puntos principales?'"
+"He procesado informe.pdf: 15 páginas, 3 tablas, 12.500 caracteres.
+Prueba a preguntarme algo, por ejemplo: '¿Cuáles son los puntos principales?'"
 ```
 
 **Formatos soportados**: PDF (.pdf), Excel (.xlsx, .xls), Word (.docx), CSV (.csv)
 **Si el formato no es soportado**: dile al usuario qué formatos acepta.
-**Si falla la extracción**: explica el error y sugiere verificar que el archivo no está corrupto.
+**Si falla**: el script informa el paso que falló. Explica el error al usuario.
+
+> **Nota**: Los scripts individuales también están disponibles si necesitas ejecutar un paso concreto. Ver la sección "Rutas importantes".
 
 ---
 

@@ -1,11 +1,25 @@
 ---
 name: doc-ingest
-description: Process and extract content from uploaded documents (PDF, Excel, Word, CSV). Use when a user uploads a file, asks to process a document, or references a file they want to work with. Handles text extraction, table parsing, and data indexing for downstream search.
+description: Process uploaded documents (PDF, Excel, Word, CSV). Use when a user uploads a file or asks to process a document. Run process_document.py for the full pipeline (extract + scan + index + dashboard) in one command.
 ---
 
 # Document Ingestion
 
-Process uploaded documents and prepare them for semantic search.
+## Quick Start — One Command
+
+When a user uploads a file, run the full pipeline:
+
+```bash
+python3 {baseDir}/scripts/process_document.py <input_file>
+```
+
+This does everything automatically:
+1. Extracts content (text, tables, data)
+2. Scans for security threats (prompt injection)
+3. Indexes in ChromaDB (semantic search)
+4. Updates dashboard data
+
+The script outputs `RESULT_JSON:{...}` with a summary. Use it to report back to the user.
 
 ## Supported Formats
 
@@ -16,49 +30,18 @@ Process uploaded documents and prepare them for semantic search.
 | Word | .docx | Text + tables via `python-docx` |
 | CSV | .csv | Data via Python `csv` |
 
-## Processing Flow
+## Individual Scripts
 
-1. User uploads a file → saved to `documents/`
-2. Detect format by extension
-3. Extract content using the appropriate script in `{baseDir}/scripts/`
-4. Save extracted content to `memory/documents/<filename>.json` with metadata:
-   ```json
-   {
-     "filename": "report.pdf",
-     "format": "pdf",
-     "pages": 15,
-     "extracted_at": "2026-03-04T12:00:00Z",
-     "chunks": [...],
-     "tables": [...],
-     "summary": "..."
-   }
-   ```
-5. Index content in RAG backend (see `rag-search` skill)
-6. Report results to user
+For manual control, each step can be run separately:
 
-## Scripts
-
-- `{baseDir}/scripts/extract.py` — Main extraction script. Usage:
-  ```bash
-  python3 {baseDir}/scripts/extract.py <input_file> <output_json>
-  ```
-
-## Dependencies
-
-Install with:
-```bash
-pip install pdfplumber openpyxl python-docx
-```
+- `{baseDir}/scripts/extract.py <input> <output.json>` — Extract content only
+- `skills/prompt-guard/scripts/scan_document.py <json>` — Security scan only
+- `skills/rag-search/scripts/index.py <json>` — Index only
+- `skills/dashboard/scripts/update_dashboard.py` — Update dashboard only
 
 ## Error Handling
 
-- If format is unsupported: tell the user which formats are supported
-- If extraction fails: report the error, suggest the user check if the file is corrupted
-- If file is too large (>100MB): warn the user, suggest splitting
-
-## After Processing
-
-Always tell the user:
-- How many pages/rows were extracted
-- Suggest a first question to try
-- Mention the dashboard if relevant data/tables were found
+- Unsupported format: tell user which formats are accepted
+- Extraction fails: report error, suggest checking if file is corrupted
+- File too large (>100MB): warn user, suggest splitting
+- Security threats: warn user, exclude flagged content from index

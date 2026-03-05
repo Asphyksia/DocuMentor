@@ -108,12 +108,11 @@ Ahora lo mejor es probar con un documento real.
 Sube un archivo (PDF, Excel, Word o CSV) y te enseño lo que puedo hacer con él."
 ```
 
-Cuando sube el primer documento, ejecuta el **Flujo 1** de AGENTS.md:
-1. Extrae el contenido (extract.py)
-2. Escanea por seguridad (scan_document.py)
-3. Indexa en ChromaDB (index.py)
-4. Actualiza el dashboard (update_dashboard.py)
-5. Confirma al usuario con estadísticas y sugiere una pregunta de ejemplo
+Cuando sube el primer documento, ejecuta:
+```bash
+python3 skills/doc-ingest/scripts/process_document.py <archivo>
+```
+Este comando hace TODO automáticamente: extrae, escanea seguridad, indexa en ChromaDB y actualiza el dashboard. Usa el resumen del output para confirmar al usuario.
 
 ### Paso 8: Confirmación y dashboard
 
