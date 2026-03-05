@@ -8,7 +8,7 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 
 - **📝 Procesa documentos**: PDF, Excel, Word, CSV
 - **🔍 Búsqueda semántica**: Preguntas en lenguaje natural sobre tus documentos (ChromaDB)
-- **📊 Dashboard visual**: Gráficos, tablas y exploración interactiva
+- **📊 Dashboard visual**: Chat con IA, gráficos, tablas y exploración interactiva
 - **🤖 IA adaptable**: Se configura según tus preferencias en el primer uso
 - **🛡️ Seguridad**: Protección contra prompt injection (600+ patrones)
 - **🔒 Privacidad**: Todo local, tus datos nunca salen de tu máquina
@@ -57,6 +57,24 @@ streamlit run dashboard/app.py
 ```
 
 Accede en: **http://localhost:8501**
+
+### Tabs
+
+| Tab | Qué hace |
+|-----|----------|
+| **💬 Chat** | Chat con IA sobre tus documentos. Busca contexto en ChromaDB automáticamente, responde con citas. Soporta streaming y visualización del razonamiento del modelo. |
+| **📋 Resumen** | Vista general: documentos procesados, métricas, formatos, chunks. |
+| **🔍 Explorador** | Navega y descarga tablas extraídas de Excel/CSV. |
+| **🔎 Búsqueda** | Búsqueda semántica directa en ChromaDB con relevancia por colores. |
+| **📊 Gráficos** | Barras, líneas y áreas sobre cualquier columna numérica. |
+
+### Chat: Configuración
+
+La API key de OpenGPU se auto-detecta del config de OpenClaw. También puedes:
+- Cambiar el modelo desde la sidebar
+- Activar/desactivar streaming (respuesta token a token)
+- Mostrar/ocultar el razonamiento del modelo
+- Ajustar cuántos fragmentos de contexto usar (1-15)
 
 ## Modelos de IA
 
