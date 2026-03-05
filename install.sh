@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ─────────────────────────────────────────────────────────
 #  DocuMentor — One-Command Installer
-#  Installs OpenClaw (if needed) + custom workspace
+#  Installs OpenClaw (if needed) + custom workspace + deps
 # ─────────────────────────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -28,74 +28,185 @@ echo -e "${BOLD}║  Inteligencia documental con IA               ║${NC}"
 echo -e "${BOLD}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
 
-# ── Step 1: Check/Install OpenClaw ──────────────────────
-header "1/5 · Verificando OpenClaw..."
+# ── Step 1: System dependencies ─────────────────────────
+header "1/6 · Verificando dependencias del sistema..."
+
+# Detect OS and package manager
+install_system_deps() {
+    if command -v apt-get &>/dev/null; then
+        info "Detectado sistema Debian/Ubuntu"
+        # Check if Python3 + pip exist
+        local need_install=false
+        if ! command -v python3 &>/dev/null; then
+            need_install=true
+        fi
+        if ! command -v pip3 &>/dev/null && ! python3 -m pip --version &>/dev/null 2>&1; then
+            need_install=true
+        fi
+        if ! command -v git &>/dev/null; then
+            need_install=true
+        fi
+
+        if [[ "$need_install" == "true" ]]; then
+            info "Instalando dependencias del sistema (python3, pip, git)..."
+            if command -v sudo &>/dev/null; then
+                sudo apt-get update -qq
+                sudo apt-get install -y -qq python3 python3-pip python3-venv git curl
+            else
+                apt-get update -qq
+                apt-get install -y -qq python3 python3-pip python3-venv git curl
+            fi
+        fi
+    elif command -v dnf &>/dev/null; then
+        info "Detectado sistema Fedora/RHEL"
+        if ! command -v python3 &>/dev/null || ! command -v pip3 &>/dev/null; then
+            sudo dnf install -y -q python3 python3-pip git curl
+        fi
+    elif command -v pacman &>/dev/null; then
+        info "Detectado sistema Arch"
+        if ! command -v python3 &>/dev/null || ! command -v pip3 &>/dev/null; then
+            sudo pacman -S --noconfirm --quiet python python-pip git curl
+        fi
+    elif command -v brew &>/dev/null; then
+        info "Detectado macOS con Homebrew"
+        if ! command -v python3 &>/dev/null; then
+            brew install python3 git curl
+        fi
+    fi
+}
+
+install_system_deps
+
+# Verify critical deps
+command -v git &>/dev/null || error "git no encontrado. Instálalo manualmente."
+command -v curl &>/dev/null || error "curl no encontrado. Instálalo manualmente."
+
+if command -v python3 &>/dev/null; then
+    PYTHON_VERSION=$(python3 --version 2>&1)
+    success "Python: $PYTHON_VERSION"
+else
+    warn "Python3 no encontrado. El dashboard y procesamiento de docs no funcionarán."
+    warn "Instálalo manualmente: https://www.python.org/downloads/"
+fi
+
+if command -v pip3 &>/dev/null; then
+    success "pip3 disponible"
+elif python3 -m pip --version &>/dev/null 2>&1; then
+    # pip available as module, create alias function
+    pip3() { python3 -m pip "$@"; }
+    success "pip disponible (como módulo)"
+else
+    warn "pip no encontrado. Se intentará instalar después."
+fi
+
+success "Dependencias del sistema OK"
+
+# ── Step 2: Check/Install OpenClaw ──────────────────────
+header "2/6 · Verificando OpenClaw..."
+
+# Reload PATH in case a previous install added it
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.nvm/current/bin:$PATH"
+[[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null || true
+[[ -f "$HOME/.profile" ]] && source "$HOME/.profile" 2>/dev/null || true
 
 if command -v openclaw &>/dev/null; then
     OPENCLAW_VERSION=$(openclaw --version 2>/dev/null || echo "unknown")
     success "OpenClaw ya instalado (${OPENCLAW_VERSION})"
 else
     info "OpenClaw no encontrado. Instalando..."
+    echo ""
     curl -fsSL https://openclaw.ai/install.sh | bash
 
+    # Reload PATH after install
+    export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.nvm/current/bin:$PATH"
+    [[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null || true
+    [[ -f "$HOME/.profile" ]] && source "$HOME/.profile" 2>/dev/null || true
+
+    # Try to find openclaw if still not in PATH
     if ! command -v openclaw &>/dev/null; then
-        error "La instalación de OpenClaw falló. Instálalo manualmente: https://docs.openclaw.ai"
+        # Search common locations
+        for dir in "$HOME/.npm-global/bin" "$HOME/.local/bin" "/usr/local/bin" "$HOME/.nvm/versions/node"/*/bin; do
+            if [[ -x "$dir/openclaw" ]]; then
+                export PATH="$dir:$PATH"
+                break
+            fi
+        done
+    fi
+
+    if ! command -v openclaw &>/dev/null; then
+        error "No se encontró openclaw después de instalar. Cierra y abre una terminal nueva, luego ejecuta ./install.sh de nuevo."
     fi
     success "OpenClaw instalado"
 fi
 
-# ── Step 2: Clone/Update repo ───────────────────────────
-header "2/5 · Descargando workspace..."
+# ── Step 3: Clone/Update repo ───────────────────────────
+header "3/6 · Descargando workspace..."
 
-if [[ -d "$INSTALL_DIR" ]]; then
+if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Directorio existente. Actualizando..."
     cd "$INSTALL_DIR"
     git pull --ff-only 2>/dev/null || warn "No se pudo actualizar. Continuando con versión actual."
 else
+    # Remove dir if exists but isn't a git repo
+    [[ -d "$INSTALL_DIR" ]] && rm -rf "$INSTALL_DIR"
     git clone "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 fi
 success "Workspace descargado: $INSTALL_DIR"
 
-# ── Step 3: Copy workspace to OpenClaw ──────────────────
-header "3/5 · Instalando workspace personalizado..."
+# ── Step 4: Copy workspace to OpenClaw ──────────────────
+header "4/6 · Instalando workspace personalizado..."
 
-mkdir -p "$OPENCLAW_WORKSPACE"
-mkdir -p "$OPENCLAW_WORKSPACE/skills"
-mkdir -p "$OPENCLAW_WORKSPACE/memory"
-mkdir -p "$OPENCLAW_WORKSPACE/documents"
+mkdir -p "$OPENCLAW_WORKSPACE"/{skills,memory,documents}
 
-# Copy workspace files (don't overwrite memory or user config if they exist)
-cp -f "$INSTALL_DIR/workspace/SOUL.md" "$OPENCLAW_WORKSPACE/SOUL.md"
-cp -f "$INSTALL_DIR/workspace/AGENTS.md" "$OPENCLAW_WORKSPACE/AGENTS.md"
-cp -f "$INSTALL_DIR/workspace/TOOLS.md" "$OPENCLAW_WORKSPACE/TOOLS.md"
-cp -f "$INSTALL_DIR/workspace/HEARTBEAT.md" "$OPENCLAW_WORKSPACE/HEARTBEAT.md"
+# Core workspace files (always overwrite — these are the "product")
+for f in SOUL.md AGENTS.md TOOLS.md HEARTBEAT.md; do
+    cp -f "$INSTALL_DIR/workspace/$f" "$OPENCLAW_WORKSPACE/$f"
+done
 
 # USER.md: only copy if it doesn't exist (preserve onboarding data)
 [[ -f "$OPENCLAW_WORKSPACE/USER.md" ]] || cp "$INSTALL_DIR/workspace/USER.md" "$OPENCLAW_WORKSPACE/USER.md"
 
-# Copy skills (always update)
+# MEMORY.md: never overwrite (user data)
+[[ -f "$OPENCLAW_WORKSPACE/MEMORY.md" ]] || touch "$OPENCLAW_WORKSPACE/MEMORY.md"
+
+# Copy skills (always update to latest version)
 cp -rf "$INSTALL_DIR/workspace/skills/"* "$OPENCLAW_WORKSPACE/skills/"
 
 success "Workspace instalado en: $OPENCLAW_WORKSPACE"
 
-# ── Step 4: API Key + Channel ───────────────────────────
-header "4/5 · Configuración..."
+# ── Step 5: API Key + Channel ───────────────────────────
+header "5/6 · Configuración..."
 
 CONFIG_FILE="$OPENCLAW_CONFIG_DIR/openclaw.json"
+SKIP_CONFIG=""
 
-# Check if config already exists
-if [[ -f "$CONFIG_FILE" ]]; then
-    info "Configuración existente detectada."
+# Check if config already exists with our models
+if [[ -f "$CONFIG_FILE" ]] && grep -q "relaygpu" "$CONFIG_FILE" 2>/dev/null; then
+    info "Configuración de DocuMentor detectada."
     echo -n "  ¿Reconfigurar? [s/N]: "
     read -r reconfig
     if [[ "${reconfig,,}" != "s" && "${reconfig,,}" != "si" && "${reconfig,,}" != "sí" ]]; then
         info "Manteniendo configuración actual."
         SKIP_CONFIG=true
     fi
+elif [[ -f "$CONFIG_FILE" ]]; then
+    info "Configuración de OpenClaw existente (sin DocuMentor)."
+    info "Se sobreescribirá con la configuración de DocuMentor."
+    echo -n "  ¿Continuar? [S/n]: "
+    read -r cont
+    if [[ "${cont,,}" == "n" || "${cont,,}" == "no" ]]; then
+        info "Saltando configuración. Configúralo manualmente en: $CONFIG_FILE"
+        SKIP_CONFIG=true
+    fi
 fi
 
-if [[ "${SKIP_CONFIG:-}" != "true" ]]; then
+# Reuse existing gateway token if available
+if [[ -f "$CONFIG_FILE" ]]; then
+    EXISTING_TOKEN=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"//' | sed 's/"//')
+fi
+
+if [[ "$SKIP_CONFIG" != "true" ]]; then
     # API Key
     echo ""
     echo "  🔑 API Key de OpenGPU Relay"
@@ -148,8 +259,11 @@ if [[ "${SKIP_CONFIG:-}" != "true" ]]; then
         esac
     done
 
-    # Generate gateway token
-    if command -v openssl &>/dev/null; then
+    # Reuse or generate gateway token
+    if [[ -n "${EXISTING_TOKEN:-}" ]]; then
+        GW_TOKEN="$EXISTING_TOKEN"
+        info "Reutilizando token del gateway existente"
+    elif command -v openssl &>/dev/null; then
         GW_TOKEN=$(openssl rand -hex 32)
     else
         GW_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))")
@@ -270,45 +384,79 @@ EOF
     success "Configuración guardada: $CONFIG_FILE"
 fi
 
-# ── Step 5: Install Python deps + Start ─────────────────
-header "5/5 · Instalando dependencias..."
+# ── Step 6: Install Python deps + Start ─────────────────
+header "6/6 · Instalando dependencias y arrancando..."
 
 # Install Python dependencies
+PYTHON_DEPS="pdfplumber openpyxl python-docx matplotlib streamlit pandas"
+PIP_INSTALLED=false
+
 if command -v pip3 &>/dev/null; then
-    pip3 install -q pdfplumber openpyxl python-docx matplotlib streamlit pandas 2>/dev/null || \
-    pip3 install --user -q pdfplumber openpyxl python-docx matplotlib streamlit pandas 2>/dev/null || \
-    warn "No se pudieron instalar dependencias Python. Instálalas manualmente: pip3 install -r $INSTALL_DIR/dashboard/requirements.txt"
-    success "Dependencias Python instaladas"
-elif command -v pip &>/dev/null; then
-    pip install -q pdfplumber openpyxl python-docx matplotlib streamlit pandas 2>/dev/null || \
-    warn "No se pudieron instalar dependencias. Instálalas manualmente."
+    PIP_CMD="pip3"
+elif python3 -m pip --version &>/dev/null 2>&1; then
+    PIP_CMD="python3 -m pip"
 else
-    warn "pip no encontrado. Instala Python 3 y luego: pip3 install -r $INSTALL_DIR/dashboard/requirements.txt"
+    PIP_CMD=""
 fi
 
-# Start/restart OpenClaw gateway
+if [[ -n "$PIP_CMD" ]]; then
+    info "Instalando dependencias Python..."
+    if $PIP_CMD install -q $PYTHON_DEPS 2>/dev/null; then
+        PIP_INSTALLED=true
+    elif $PIP_CMD install --user -q $PYTHON_DEPS 2>/dev/null; then
+        PIP_INSTALLED=true
+    elif $PIP_CMD install --break-system-packages -q $PYTHON_DEPS 2>/dev/null; then
+        PIP_INSTALLED=true
+    elif $PIP_CMD install --user --break-system-packages -q $PYTHON_DEPS 2>/dev/null; then
+        PIP_INSTALLED=true
+    fi
+
+    if [[ "$PIP_INSTALLED" == "true" ]]; then
+        success "Dependencias Python instaladas"
+    else
+        warn "No se pudieron instalar algunas dependencias."
+        warn "Prueba manualmente: $PIP_CMD install $PYTHON_DEPS"
+    fi
+else
+    warn "pip no disponible. Instala las dependencias manualmente:"
+    warn "  pip3 install $PYTHON_DEPS"
+fi
+
+# Sync service token and start/restart gateway
 info "Iniciando OpenClaw Gateway..."
 if command -v openclaw &>/dev/null; then
+    # Fix service if needed
+    openclaw doctor --repair 2>/dev/null || true
+    # Force install to sync token
+    openclaw gateway install --force 2>/dev/null || true
+    # Start or restart
     openclaw gateway restart 2>/dev/null || openclaw gateway start 2>/dev/null || \
-    warn "No se pudo iniciar el gateway automáticamente. Ejecuta: openclaw gateway start"
+    warn "No se pudo iniciar el gateway. Ejecuta: openclaw gateway start"
+    success "Gateway iniciado"
 fi
 
 # ── Done ────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${NC}"
-echo -e "${GREEN}${BOLD}  ✅ ¡Instalación completada!${NC}"
-echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}${BOLD}  ✅ ¡DocuMentor instalado correctamente!${NC}"
+echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════${NC}"
 echo ""
 echo "  📄 Workspace:  $OPENCLAW_WORKSPACE"
 echo "  ⚙️  Config:     $CONFIG_FILE"
-echo "  📊 Dashboard:  cd $INSTALL_DIR && streamlit run dashboard/app.py"
-echo ""
-echo "  🎓 DocuMentor está listo."
 echo ""
 
-if [[ -n "${CHANNEL:-}" ]]; then
-    echo "  ⚠️  Añade tu ID de usuario a 'allowFrom' en el config."
-    echo "     Luego reinicia: openclaw gateway restart"
+if [[ -n "${CHANNEL:-}" && "${CHANNEL:-}" != "" ]]; then
+    echo "  💬 Canal: ${CHANNEL}"
+    echo ""
+    echo "  ⚠️  IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
+    echo "     $CONFIG_FILE"
+    echo ""
+    echo "     Cómo encontrar tu ID:"
+    echo "     1. Manda un mensaje al bot"
+    echo "     2. Mira los logs: openclaw gateway logs | tail -20"
+    echo "     3. Busca tu ID numérico"
+    echo "     4. Añádelo a allowFrom: [\"TU_ID\"]"
+    echo "     5. Reinicia: openclaw gateway restart"
     echo ""
 fi
 
@@ -317,14 +465,25 @@ if [[ "${CHANNEL:-}" == "whatsapp" ]]; then
     echo ""
 fi
 
+# Gateway token display
+if [[ -n "${GW_TOKEN:-}" ]]; then
+    echo "  🔑 Token del dashboard: ${GW_TOKEN}"
+    echo "     (guárdalo para acceder al dashboard web de OpenClaw)"
+    echo ""
+fi
+
+echo "  📊 Iniciar dashboard visual:"
+echo "     cd $INSTALL_DIR && streamlit run dashboard/app.py"
+echo ""
+echo "  🎓 DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
+echo ""
+echo "  ─────────────────────────────────────────────"
+echo "  Comandos útiles:"
+echo "     openclaw gateway status     # Ver estado"
+echo "     openclaw gateway restart    # Reiniciar"
+echo "     openclaw gateway logs       # Ver logs"
+echo "     openclaw update             # Actualizar OpenClaw"
+echo ""
 echo "  📖 Docs:     https://docs.openclaw.ai"
 echo "  💬 Soporte:  https://discord.gg/clawd"
-echo ""
-echo "  Comandos útiles:"
-echo "     openclaw gateway status    # Ver estado"
-echo "     openclaw gateway restart   # Reiniciar"
-echo "     openclaw gateway logs      # Ver logs"
-echo ""
-echo "  Para iniciar el dashboard:"
-echo "     cd $INSTALL_DIR && streamlit run dashboard/app.py"
 echo ""
