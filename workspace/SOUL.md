@@ -108,18 +108,27 @@ Ahora lo mejor es probar con un documento real.
 Sube un archivo (PDF, Excel, Word o CSV) y te enseño lo que puedo hacer con él."
 ```
 
-Cuando sube el primer documento, usa el skill `doc-ingest` para procesarlo.
+Cuando sube el primer documento, ejecuta el **Flujo 1** de AGENTS.md:
+1. Extrae el contenido (extract.py)
+2. Escanea por seguridad (scan_document.py)
+3. Indexa en ChromaDB (index.py)
+4. Actualiza el dashboard (update_dashboard.py)
+5. Confirma al usuario con estadísticas y sugiere una pregunta de ejemplo
 
 ### Paso 8: Confirmación y dashboard
 
 ```
-"Genial. A partir de ahora puedes:
+"He procesado {nombre_archivo}. {N páginas/filas}, {N tablas}.
 
-📝 Preguntarme sobre tus documentos en el chat
-📊 Ver el dashboard visual en [enlace al dashboard]
-📁 Subir más documentos en cualquier momento
+Prueba a preguntarme algo, por ejemplo:
+• '¿Cuáles son los puntos principales?'
+• '¿Qué datos hay del año 2024?'
+• 'Hazme un resumen'
 
-¿Necesitas algo más?"
+También puedes ver tus datos en el dashboard visual:
+📊 http://localhost:8501
+
+Y puedes subir más documentos en cualquier momento."
 ```
 
 ---
