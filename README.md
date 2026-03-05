@@ -10,6 +10,7 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 - **🔍 Búsqueda semántica**: Preguntas en lenguaje natural sobre tus documentos (ChromaDB)
 - **📊 Dashboard visual**: Gráficos, tablas y exploración interactiva
 - **🤖 IA adaptable**: Se configura según tus preferencias en el primer uso
+- **🛡️ Seguridad**: Protección contra prompt injection (600+ patrones)
 - **🔒 Privacidad**: Todo local, tus datos nunca salen de tu máquina
 
 ## Instalar
@@ -83,6 +84,7 @@ DocuMentor/
 │   ├── skills/
 │   │   ├── doc-ingest/         # Procesamiento de documentos
 │   │   ├── rag-search/         # Búsqueda semántica (ChromaDB)
+│   │   ├── prompt-guard/       # Seguridad anti prompt-injection
 │   │   └── dashboard/          # Visualización de datos
 │   ├── memory/                 # Config de usuario + datos
 │   └── documents/              # Documentos subidos
