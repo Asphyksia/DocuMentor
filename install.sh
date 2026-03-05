@@ -173,6 +173,12 @@ done
 # Copy skills (always update to latest version)
 cp -rf "$INSTALL_DIR/workspace/skills/"* "$OPENCLAW_WORKSPACE/skills/"
 
+# Clean up residual files from OpenClaw's default onboard
+# These are generic templates that we don't need
+for residual in BOOTSTRAP.md IDENTITY.md; do
+    [[ -f "$OPENCLAW_WORKSPACE/$residual" ]] && rm -f "$OPENCLAW_WORKSPACE/$residual"
+done
+
 success "Workspace instalado en: $OPENCLAW_WORKSPACE"
 
 # ── Step 5: API Key + Channel ───────────────────────────
