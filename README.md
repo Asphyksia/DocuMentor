@@ -17,12 +17,18 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 
 ### Opción 1: Un solo comando (recomendado)
 
+**Linux / macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash
 ```
 
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 | iex
+```
+
 El instalador:
-1. Instala OpenClaw si no lo tienes
+1. Instala OpenClaw si no lo tienes (+ Node.js, Python y git si faltan)
 2. Descarga el workspace personalizado
 3. Configura los modelos de IA (API key + canal)
 4. Instala dependencias Python
@@ -30,6 +36,7 @@ El instalador:
 
 ### Opción 2: Manual
 
+**Linux / macOS:**
 ```bash
 # 1. Instalar OpenClaw
 curl -fsSL https://openclaw.ai/install.sh | bash
@@ -40,6 +47,19 @@ cd DocuMentor
 
 # 3. Ejecutar setup
 ./install.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+# 1. Instalar OpenClaw
+npm install -g openclaw
+
+# 2. Clonar este repo
+git clone https://github.com/Asphyksia/DocuMentor.git
+cd DocuMentor
+
+# 3. Ejecutar setup
+.\install.ps1
 ```
 
 ## Después de instalar
@@ -92,7 +112,8 @@ Estimación: **~€5-15/mes** para uso moderado (500 consultas/día).
 
 ```
 DocuMentor/
-├── install.sh                  # Instalador todo-en-uno
+├── install.sh                  # Instalador (Linux/macOS)
+├── install.ps1                 # Instalador (Windows)
 ├── workspace/
 │   ├── SOUL.md                 # Personalidad + onboarding
 │   ├── AGENTS.md               # Reglas operativas

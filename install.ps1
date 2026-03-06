@@ -1,0 +1,487 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    DocuMentor — One-Command Installer for Windows
+.DESCRIPTION
+    Installs OpenClaw (if needed) + custom workspace + Python deps
+.EXAMPLE
+    irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 | iex
+#>
+
+$ErrorActionPreference = "Stop"
+
+# ── Colors ──────────────────────────────────────────────
+function Info($msg)    { Write-Host "  ℹ $msg" -ForegroundColor Cyan }
+function Success($msg) { Write-Host "  ✓ $msg" -ForegroundColor Green }
+function Warn($msg)    { Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
+function Fail($msg)    { Write-Host "  ✗ $msg" -ForegroundColor Red; exit 1 }
+function Header($msg)  { Write-Host "`n  $msg`n" -ForegroundColor White -BackgroundColor DarkBlue }
+
+$RepoUrl          = "https://github.com/Asphyksia/DocuMentor.git"
+$InstallDir       = Join-Path $env:USERPROFILE "DocuMentor"
+$OpenClawConfig   = Join-Path $env:USERPROFILE ".openclaw"
+$OpenClawWorkspace= Join-Path $OpenClawConfig "workspace"
+$ConfigFile       = Join-Path $OpenClawConfig "openclaw.json"
+
+# ── Banner ──────────────────────────────────────────────
+Write-Host ""
+Write-Host "  ╔═══════════════════════════════════════════════╗" -ForegroundColor White
+Write-Host "  ║  📄 DocuMentor — Instalador (Windows)         ║" -ForegroundColor White
+Write-Host "  ║  Inteligencia documental con IA               ║" -ForegroundColor White
+Write-Host "  ╚═══════════════════════════════════════════════╝" -ForegroundColor White
+Write-Host ""
+
+# ── Step 1: System dependencies ─────────────────────────
+Header "1/6 · Verificando dependencias del sistema..."
+
+# Check Node.js
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    $nodeVer = node --version
+    Success "Node.js: $nodeVer"
+} else {
+    Warn "Node.js no encontrado."
+    Info "Instalando Node.js via winget..."
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>$null
+        # Refresh PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+            Fail "Node.js no se instaló correctamente. Instálalo manualmente: https://nodejs.org"
+        }
+        Success "Node.js instalado"
+    } else {
+        Fail "winget no disponible. Instala Node.js manualmente: https://nodejs.org"
+    }
+}
+
+# Check Git
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    Success "git disponible"
+} else {
+    Info "Instalando git via winget..."
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements 2>$null
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Fail "git no se instaló correctamente. Instálalo manualmente: https://git-scm.com"
+        }
+        Success "git instalado"
+    } else {
+        Fail "git no encontrado. Instálalo manualmente: https://git-scm.com"
+    }
+}
+
+# Check Python
+$pythonCmd = $null
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $pyVer = python --version 2>&1
+    if ($pyVer -match "Python 3") {
+        $pythonCmd = "python"
+        Success "Python: $pyVer"
+    }
+}
+if (-not $pythonCmd -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
+    $pythonCmd = "python3"
+    Success "Python: $(python3 --version)"
+}
+if (-not $pythonCmd) {
+    Warn "Python3 no encontrado."
+    Info "Instalando Python via winget..."
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements 2>$null
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+        if (Get-Command python -ErrorAction SilentlyContinue) {
+            $pythonCmd = "python"
+            Success "Python instalado"
+        } else {
+            Warn "Python no se instaló correctamente. El dashboard no funcionará."
+            Warn "Instálalo manualmente: https://www.python.org/downloads/"
+        }
+    } else {
+        Warn "Instala Python manualmente: https://www.python.org/downloads/"
+    }
+}
+
+Success "Dependencias del sistema OK"
+
+# ── Step 2: Check/Install OpenClaw ──────────────────────
+Header "2/6 · Verificando OpenClaw..."
+
+# Refresh PATH
+$env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+$npmGlobal = Join-Path $env:APPDATA "npm"
+if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
+
+if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+    $clawVer = openclaw --version 2>&1
+    Success "OpenClaw ya instalado ($clawVer)"
+} else {
+    Info "OpenClaw no encontrado. Instalando..."
+    try {
+        npm install -g openclaw 2>&1 | Out-Null
+        # Refresh PATH
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+        if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
+
+        if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) {
+            Fail "OpenClaw no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
+        }
+        Success "OpenClaw instalado"
+    } catch {
+        Fail "Error instalando OpenClaw: $_"
+    }
+}
+
+# ── Step 3: Clone/Update repo ───────────────────────────
+Header "3/6 · Descargando workspace..."
+
+if (Test-Path (Join-Path $InstallDir ".git")) {
+    Info "Directorio existente. Actualizando..."
+    Push-Location $InstallDir
+    git pull --ff-only 2>$null
+    Pop-Location
+} else {
+    if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
+    git clone $RepoUrl $InstallDir
+}
+Success "Workspace descargado: $InstallDir"
+
+# ── Step 4: Copy workspace to OpenClaw ──────────────────
+Header "4/6 · Instalando workspace personalizado..."
+
+# Create dirs
+foreach ($d in @("skills", "memory", "documents")) {
+    $p = Join-Path $OpenClawWorkspace $d
+    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+}
+
+# Core workspace files (always overwrite)
+foreach ($f in @("SOUL.md", "AGENTS.md", "TOOLS.md", "HEARTBEAT.md")) {
+    Copy-Item -Force (Join-Path $InstallDir "workspace\$f") (Join-Path $OpenClawWorkspace $f)
+}
+
+# USER.md: only copy if not exists
+$userMd = Join-Path $OpenClawWorkspace "USER.md"
+if (-not (Test-Path $userMd)) {
+    Copy-Item (Join-Path $InstallDir "workspace\USER.md") $userMd
+}
+
+# MEMORY.md: never overwrite
+$memMd = Join-Path $OpenClawWorkspace "MEMORY.md"
+if (-not (Test-Path $memMd)) { "" | Out-File -Encoding utf8 $memMd }
+
+# Copy skills
+Copy-Item -Recurse -Force (Join-Path $InstallDir "workspace\skills\*") (Join-Path $OpenClawWorkspace "skills\")
+
+# Clean residual onboard files
+foreach ($r in @("BOOTSTRAP.md", "IDENTITY.md")) {
+    $rp = Join-Path $OpenClawWorkspace $r
+    if (Test-Path $rp) { Remove-Item -Force $rp }
+}
+
+Success "Workspace instalado en: $OpenClawWorkspace"
+
+# ── Step 5: API Key + Channel ───────────────────────────
+Header "5/6 · Configuración..."
+
+$SkipConfig = $false
+$ExistingToken = $null
+
+# Check existing config
+if (Test-Path $ConfigFile) {
+    $configContent = Get-Content $ConfigFile -Raw -ErrorAction SilentlyContinue
+    # Try to extract existing token
+    if ($configContent -match '"token"\s*:\s*"([^"]+)"') {
+        $ExistingToken = $Matches[1]
+    }
+
+    if ($configContent -match "relaygpu") {
+        Info "Configuración de DocuMentor detectada."
+        $reconfig = Read-Host "  ¿Reconfigurar? [s/N]"
+        if ($reconfig -notin @("s", "si", "sí")) {
+            Info "Manteniendo configuración actual."
+            $SkipConfig = $true
+        }
+    } else {
+        Info "Configuración de OpenClaw existente (sin DocuMentor)."
+        $cont = Read-Host "  ¿Sobreescribir con config de DocuMentor? [S/n]"
+        if ($cont -in @("n", "no")) {
+            Info "Saltando configuración."
+            $SkipConfig = $true
+        }
+    }
+}
+
+if (-not $SkipConfig) {
+    # API Key
+    Write-Host ""
+    Write-Host "  🔑 API Key de OpenGPU Relay"
+    Write-Host "  Consigue una en: https://relaygpu.com"
+    Write-Host ""
+    do {
+        $apiKey = Read-Host "  API Key"
+        if (-not $apiKey) { Warn "La API key no puede estar vacía" }
+    } while (-not $apiKey)
+
+    # Channel
+    Write-Host ""
+    Write-Host "  💬 Canal de comunicación"
+    Write-Host "  1) Telegram (recomendado)"
+    Write-Host "  2) WhatsApp"
+    Write-Host "  3) Discord"
+    Write-Host "  4) Omitir por ahora"
+    Write-Host ""
+
+    $channelName = ""
+    $channelToken = ""
+    $channelJson = ""
+
+    do {
+        $chChoice = Read-Host "  Opción [1]"
+        if (-not $chChoice) { $chChoice = "1" }
+        switch ($chChoice) {
+            "1" {
+                $channelName = "telegram"
+                Write-Host ""
+                Write-Host "  Crea un bot con @BotFather en Telegram y pega el token:"
+                $channelToken = Read-Host "  Bot Token"
+                break
+            }
+            "2" {
+                $channelName = "whatsapp"
+                Info "WhatsApp mostrará un QR después del setup"
+                break
+            }
+            "3" {
+                $channelName = "discord"
+                Write-Host ""
+                Write-Host "  Crea un bot en https://discord.com/developers/applications"
+                $channelToken = Read-Host "  Bot Token"
+                break
+            }
+            "4" { break }
+            default { Warn "Elige 1-4" }
+        }
+    } while ($chChoice -notin @("1","2","3","4"))
+
+    # Gateway token
+    if ($ExistingToken) {
+        $gwToken = $ExistingToken
+        Info "Reutilizando token del gateway existente"
+    } else {
+        $gwToken = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Max 256) })
+    }
+
+    # Build channel config block
+    switch ($channelName) {
+        "telegram" {
+            $channelJson = @"
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "$channelToken",
+      "dmPolicy": "allowlist",
+      "allowFrom": [],
+      "groupPolicy": "allowlist",
+      "streaming": "partial"
+    }
+  },
+"@
+        }
+        "discord" {
+            $channelJson = @"
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "botToken": "$channelToken",
+      "dmPolicy": "allowlist",
+      "allowFrom": [],
+      "groupPolicy": "allowlist"
+    }
+  },
+"@
+        }
+        "whatsapp" {
+            $channelJson = @"
+  "channels": {
+    "whatsapp": {
+      "enabled": true,
+      "dmPolicy": "allowlist",
+      "allowFrom": []
+    }
+  },
+"@
+        }
+        default { $channelJson = "" }
+    }
+
+    # Write config
+    $configJson = @"
+{
+  "models": {
+    "providers": {
+      "relaygpu-anthropic": {
+        "baseUrl": "https://relay.opengpu.network/v2/anthropic/v1/",
+        "apiKey": "$apiKey",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "anthropic/claude-sonnet-4-6",
+            "name": "Claude Sonnet 4-6 (OpenGPU)",
+            "api": "anthropic-messages",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 200000,
+            "maxTokens": 64000
+          }
+        ]
+      },
+      "relaygpu-openai": {
+        "baseUrl": "https://relay.opengpu.network/v2/openai/v1/",
+        "apiKey": "$apiKey",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "moonshotai/kimi-k2.5",
+            "name": "Kimi K2.5 (OpenGPU)",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 128000,
+            "maxTokens": 65536
+          },
+          {
+            "id": "deepseek-ai/DeepSeek-V3.1",
+            "name": "DeepSeek V3.1 (OpenGPU)",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 128000,
+            "maxTokens": 65536
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "relaygpu-openai/moonshotai/kimi-k2.5"
+      },
+      "workspace": "$($OpenClawWorkspace -replace '\\', '/')"
+    }
+  },
+$channelJson
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "token": "$gwToken"
+    }
+  }
+}
+"@
+
+    # Ensure config dir exists
+    if (-not (Test-Path $OpenClawConfig)) {
+        New-Item -ItemType Directory -Path $OpenClawConfig -Force | Out-Null
+    }
+
+    $configJson | Out-File -Encoding utf8 $ConfigFile
+    Success "Configuración guardada: $ConfigFile"
+}
+
+# ── Step 6: Install Python deps + Start ─────────────────
+Header "6/6 · Instalando dependencias y arrancando..."
+
+$pythonDeps = "chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas prompt-guard"
+$pipInstalled = $false
+
+if ($pythonCmd) {
+    Info "Instalando dependencias Python..."
+    try {
+        & $pythonCmd -m pip install -q $pythonDeps.Split(" ") 2>$null
+        $pipInstalled = $true
+    } catch {}
+
+    if (-not $pipInstalled) {
+        try {
+            & $pythonCmd -m pip install --user -q $pythonDeps.Split(" ") 2>$null
+            $pipInstalled = $true
+        } catch {}
+    }
+
+    if ($pipInstalled) {
+        Success "Dependencias Python instaladas"
+    } else {
+        Warn "No se pudieron instalar algunas dependencias."
+        Warn "Prueba manualmente: $pythonCmd -m pip install $pythonDeps"
+    }
+} else {
+    Warn "Python no disponible. Instala las dependencias manualmente."
+}
+
+# Start gateway
+Info "Iniciando OpenClaw Gateway..."
+try {
+    openclaw doctor --repair 2>$null
+    openclaw gateway install --force 2>$null
+    openclaw gateway restart 2>$null
+    Success "Gateway iniciado"
+} catch {
+    Warn "No se pudo iniciar el gateway. Ejecuta: openclaw gateway start"
+}
+
+# ── Done ────────────────────────────────────────────────
+Write-Host ""
+Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "  ✅ ¡DocuMentor instalado correctamente!" -ForegroundColor Green
+Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host ""
+Write-Host "  📄 Workspace:  $OpenClawWorkspace"
+Write-Host "  ⚙️  Config:     $ConfigFile"
+Write-Host ""
+
+if ($channelName) {
+    Write-Host "  💬 Canal: $channelName"
+    Write-Host ""
+    Write-Host "  ⚠️  IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
+    Write-Host "     $ConfigFile"
+    Write-Host ""
+    Write-Host "     Cómo encontrar tu ID:"
+    Write-Host "     1. Manda un mensaje al bot"
+    Write-Host "     2. Mira los logs: openclaw gateway logs | Select -Last 20"
+    Write-Host "     3. Busca tu ID numérico"
+    Write-Host "     4. Añádelo a allowFrom: [`"TU_ID`"]"
+    Write-Host "     5. Reinicia: openclaw gateway restart"
+    Write-Host ""
+}
+
+if ($channelName -eq "whatsapp") {
+    Write-Host "  📱 Para vincular WhatsApp: openclaw channels login"
+    Write-Host ""
+}
+
+if ($gwToken) {
+    Write-Host "  🔑 Token del dashboard: $gwToken"
+    Write-Host "     (guárdalo para acceder al dashboard web de OpenClaw)"
+    Write-Host ""
+}
+
+Write-Host "  📊 Iniciar dashboard visual:"
+Write-Host "     cd $InstallDir; streamlit run dashboard\app.py"
+Write-Host ""
+Write-Host "  🎓 DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
+Write-Host ""
+Write-Host "  ─────────────────────────────────────────────"
+Write-Host "  Comandos útiles:"
+Write-Host "     openclaw gateway status     # Ver estado"
+Write-Host "     openclaw gateway restart    # Reiniciar"
+Write-Host "     openclaw gateway logs       # Ver logs"
+Write-Host "     openclaw update             # Actualizar OpenClaw"
+Write-Host ""
+Write-Host "  📖 Docs:     https://docs.openclaw.ai"
+Write-Host "  💬 Soporte:  https://discord.gg/clawd"
+Write-Host ""
