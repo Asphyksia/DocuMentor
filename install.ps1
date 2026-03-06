@@ -114,10 +114,25 @@ Info "Lanzando install.sh dentro de WSL ($wslDistro)..."
 Write-Host ""
 
 try {
-    # Download first, then execute — pipe breaks stdin (interactive prompts need it)
-    wsl -d $wslDistro -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh"
+    # Write a launcher script that WSL will execute interactively
+    # Using wsl with -e bash and a script file preserves stdin for interactive prompts
+    $wslScript = "/tmp/dm-install.sh"
+
+    # Download the installer inside WSL first
+    Info "Descargando instalador..."
+    wsl -d $wslDistro -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o $wslScript && chmod +x $wslScript"
     if ($LASTEXITCODE -ne 0) {
-        Fail "El instalador de Linux fallo con codigo $LASTEXITCODE"
+        Fail "No se pudo descargar el instalador"
+    }
+
+    # Run interactively — wsl without --, bash with -i keeps stdin open
+    Info "Ejecutando instalador interactivo (puedes escribir normalmente)..."
+    Write-Host ""
+    wsl -d $wslDistro -e bash -li $wslScript
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -ne 0) {
+        Fail "El instalador de Linux fallo con codigo $exitCode"
     }
 } catch {
     Fail "Error ejecutando el instalador en WSL: $_"
