@@ -1,574 +1,147 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    DocuMentor — One-Command Installer for Windows
+    DocuMentor - One-Command Installer for Windows (via WSL2)
 .DESCRIPTION
-    Installs OpenClaw (if needed) + custom workspace + Python deps
+    Sets up WSL2 with Ubuntu if needed, then runs the Linux installer inside WSL.
+    OpenClaw requires WSL2 on Windows.
 .EXAMPLE
-    irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 -OutFile $env:TEMP\dm-install.ps1; & $env:TEMP\dm-install.ps1
 #>
 
 $ErrorActionPreference = "Stop"
 
-# ── Colors ──────────────────────────────────────────────
 function Info($msg)    { Write-Host "  [i] $msg" -ForegroundColor Cyan }
 function Success($msg) { Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Warn($msg)    { Write-Host "  [!] $msg" -ForegroundColor Yellow }
 function Fail($msg)    { Write-Host "  [X] $msg" -ForegroundColor Red; exit 1 }
 function Header($msg)  { Write-Host "`n  $msg`n" -ForegroundColor White -BackgroundColor DarkBlue }
 
-$RepoUrl          = "https://github.com/Asphyksia/DocuMentor.git"
-$InstallDir       = Join-Path $env:USERPROFILE "DocuMentor"
-$OpenClawConfig   = Join-Path $env:USERPROFILE ".openclaw"
-$OpenClawWorkspace= Join-Path $OpenClawConfig "workspace"
-$ConfigFile       = Join-Path $OpenClawConfig "openclaw.json"
-
-# ── Banner ──────────────────────────────────────────────
 Write-Host ""
-Write-Host "  ╔═══════════════════════════════════════════════╗" -ForegroundColor White
-Write-Host "  ║  DocuMentor — Instalador (Windows)         ║" -ForegroundColor White
-Write-Host "  ║  Inteligencia documental con IA               ║" -ForegroundColor White
-Write-Host "  ╚═══════════════════════════════════════════════╝" -ForegroundColor White
+Write-Host "  ======================================================" -ForegroundColor White
+Write-Host "  DocuMentor - Instalador (Windows)" -ForegroundColor White
+Write-Host "  Inteligencia documental con IA" -ForegroundColor White
+Write-Host "  ======================================================" -ForegroundColor White
+Write-Host ""
+Write-Host "  OpenClaw requiere WSL2 en Windows." -ForegroundColor Yellow
+Write-Host "  Este instalador configura WSL2 y ejecuta el setup de Linux." -ForegroundColor Yellow
 Write-Host ""
 
-# ── Step 1: System dependencies ─────────────────────────
-Header "1/6 · Verificando dependencias del sistema..."
+# ── Step 1: Check/Install WSL2 ─────────────────────────
+Header "1/3 - Verificando WSL2..."
 
-# Check Node.js
-if (Get-Command node -ErrorAction SilentlyContinue) {
-    $nodeVer = node --version
-    Success "Node.js: $nodeVer"
-} else {
-    Warn "Node.js no encontrado."
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Info "Instalando Node.js via winget..."
-        try {
-            $wingetOut = winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>&1
-            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-            # Check common Node paths
-            $nodePaths = @("$env:ProgramFiles\nodejs", "${env:ProgramFiles(x86)}\nodejs")
-            foreach ($np in $nodePaths) {
-                if ((Test-Path "$np\node.exe") -and ($env:PATH -notlike "*$np*")) {
-                    $env:PATH = "$np;$env:PATH"
-                    break
-                }
-            }
-            if (Get-Command node -ErrorAction SilentlyContinue) {
-                Success "Node.js instalado"
-            } else {
-                Fail "Node.js no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
-            }
-        } catch {
-            Fail "Error instalando Node.js: $_`nInstálalo manualmente: https://nodejs.org"
-        }
-    } else {
-        Fail "winget no disponible. Instala Node.js manualmente: https://nodejs.org"
-    }
-}
-
-# Check Git
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    Success "git disponible"
-} else {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Info "Instalando git via winget..."
-        try {
-            $wingetOut = winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements 2>&1
-            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-            # Check common git paths
-            $gitPaths = @("$env:ProgramFiles\Git\cmd", "${env:ProgramFiles(x86)}\Git\cmd")
-            foreach ($gp in $gitPaths) {
-                if ((Test-Path "$gp\git.exe") -and ($env:PATH -notlike "*$gp*")) {
-                    $env:PATH = "$gp;$env:PATH"
-                    break
-                }
-            }
-            if (Get-Command git -ErrorAction SilentlyContinue) {
-                Success "git instalado"
-            } else {
-                Fail "git no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
-            }
-        } catch {
-            Fail "Error instalando git: $_`nInstálalo manualmente: https://git-scm.com"
-        }
-    } else {
-        Fail "git no encontrado y winget no disponible. Instálalo manualmente: https://git-scm.com"
-    }
-}
-
-# Check Python (Windows has a fake "python" alias that redirects to MS Store — must handle carefully)
-$pythonCmd = $null
+$wslAvailable = $false
 try {
-    $ErrorActionPreference_backup = $ErrorActionPreference
+    $ErrorActionPreference_bak = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $pyVer = & python --version 2>&1
-    $ErrorActionPreference = $ErrorActionPreference_backup
-    if ($LASTEXITCODE -eq 0 -and "$pyVer" -match "Python 3") {
-        $pythonCmd = "python"
-        Success "Python: $pyVer"
+    $wslCheck = wsl --status 2>&1
+    $ErrorActionPreference = $ErrorActionPreference_bak
+    if ($LASTEXITCODE -eq 0) {
+        $wslAvailable = $true
     }
 } catch {
     $ErrorActionPreference = "Stop"
 }
-if (-not $pythonCmd) {
+
+# Also check if any distro is installed
+$wslDistro = $null
+if ($wslAvailable) {
     try {
-        $ErrorActionPreference_backup = $ErrorActionPreference
+        $ErrorActionPreference_bak = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $pyVer = & python3 --version 2>&1
-        $ErrorActionPreference = $ErrorActionPreference_backup
-        if ($LASTEXITCODE -eq 0 -and "$pyVer" -match "Python 3") {
-            $pythonCmd = "python3"
-            Success "Python: $pyVer"
+        $distroList = wsl -l -q 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { $_.Trim() -replace '\x00','' }
+        $ErrorActionPreference = $ErrorActionPreference_bak
+        if ($distroList) {
+            # Pick Ubuntu if available, otherwise first distro
+            foreach ($d in $distroList) {
+                if ($d -match "Ubuntu") {
+                    $wslDistro = $d
+                    break
+                }
+            }
+            if (-not $wslDistro) {
+                $wslDistro = $distroList[0]
+            }
         }
     } catch {
         $ErrorActionPreference = "Stop"
     }
 }
-if (-not $pythonCmd) {
-    Warn "Python3 no encontrado."
-    $pyInstalled = $false
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Info "Instalando Python via winget..."
-        try {
-            $wingetOut = winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements 2>&1
-            # Refresh PATH after install
-            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-            # Also check common Python install locations
-            $pyPaths = @(
-                "$env:LOCALAPPDATA\Programs\Python\Python312",
-                "$env:LOCALAPPDATA\Programs\Python\Python311",
-                "$env:LOCALAPPDATA\Programs\Python\Python310",
-                "$env:ProgramFiles\Python312",
-                "$env:ProgramFiles\Python311"
-            )
-            foreach ($pp in $pyPaths) {
-                if ((Test-Path "$pp\python.exe") -and ($env:PATH -notlike "*$pp*")) {
-                    $env:PATH = "$pp;$pp\Scripts;$env:PATH"
-                    break
-                }
-            }
 
-            if (Get-Command python -ErrorAction SilentlyContinue) {
-                $pythonCmd = "python"
-                $pyInstalled = $true
-                Success "Python instalado"
-            }
-        } catch {
-            Warn "winget no pudo instalar Python: $_"
-        }
-    }
-    if (-not $pyInstalled) {
-        Warn "Python no está instalado. El dashboard y procesamiento de docs no funcionarán."
-        Warn "Instálalo manualmente desde: https://www.python.org/downloads/"
-        Warn "Marca 'Add Python to PATH' durante la instalación."
-        Write-Host ""
-        $cont = Read-Host "  ¿Continuar sin Python? [S/n]"
-        if ($cont -in @("n", "no")) {
-            Fail "Instalación cancelada. Instala Python y vuelve a ejecutar el script."
-        }
-    }
-}
-
-Success "Dependencias del sistema OK"
-
-# ── Step 2: Check/Install OpenClaw ──────────────────────
-Header "2/6 · Verificando OpenClaw..."
-
-# Refresh PATH
-$env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-$npmGlobal = Join-Path $env:APPDATA "npm"
-if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
-
-if (Get-Command openclaw -ErrorAction SilentlyContinue) {
-    $clawVer = openclaw --version 2>&1
-    Success "OpenClaw ya instalado ($clawVer)"
-} else {
-    Info "OpenClaw no encontrado. Instalando con el instalador oficial..."
+if ($wslAvailable -and $wslDistro) {
+    Success "WSL2 disponible con distro: $wslDistro"
+} elseif ($wslAvailable -and -not $wslDistro) {
+    Info "WSL2 disponible pero sin distro instalada. Instalando Ubuntu..."
     try {
-        $ErrorActionPreference_backup = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-
-        # Download and run the official OpenClaw Windows installer
-        $clawInstaller = "$env:TEMP\openclaw-install.ps1"
-        Invoke-WebRequest -Uri "https://openclaw.ai/install.ps1" -OutFile $clawInstaller -UseBasicParsing
-        & $clawInstaller -NoOnboard
-
-        $ErrorActionPreference = $ErrorActionPreference_backup
-
-        # Refresh PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-        if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
-        # Check npm prefix
-        try {
-            $npmPrefix = (npm config get prefix 2>$null).Trim()
-            if ($npmPrefix -and (Test-Path $npmPrefix) -and ($env:PATH -notlike "*$npmPrefix*")) {
-                $env:PATH = "$npmPrefix;$env:PATH"
-            }
-        } catch {}
-
-        if (Get-Command openclaw -ErrorAction SilentlyContinue) {
-            Success "OpenClaw instalado"
-        } else {
-            # Fallback: try npm directly with env var to skip native builds
-            Warn "Instalador oficial no encontró openclaw en PATH. Intentando npm directo..."
-            $env:SHARP_IGNORE_GLOBAL_LIBVIPS = "1"
-            $npmProc = Start-Process -FilePath "npm" -ArgumentList "install -g openclaw@latest" `
-                -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\openclaw-npm-out.txt" `
-                -RedirectStandardError "$env:TEMP\openclaw-npm-err.txt"
-
-            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-            if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
-
-            if (Get-Command openclaw -ErrorAction SilentlyContinue) {
-                Success "OpenClaw instalado via npm"
-            } else {
-                Fail "OpenClaw no se pudo instalar. Prueba manualmente:`n  npm install -g openclaw@latest`nO considera usar WSL2: https://learn.microsoft.com/windows/wsl/install"
-            }
+        wsl --install -d Ubuntu --no-launch
+        $wslDistro = "Ubuntu"
+        Write-Host ""
+        Warn "Ubuntu instalado en WSL2."
+        Warn "Puede que necesites REINICIAR el PC para completar la instalacion."
+        Write-Host ""
+        $restart = Read-Host "  Si ya has reiniciado o quieres continuar, pulsa Enter. Si no, escribe 'salir'"
+        if ($restart -eq "salir") {
+            Info "Reinicia el PC y vuelve a ejecutar este instalador."
+            exit 0
         }
     } catch {
-        Fail "Error instalando OpenClaw: $_`nConsidera usar WSL2: https://learn.microsoft.com/windows/wsl/install"
+        Fail "No se pudo instalar Ubuntu en WSL2: $_`nEjecuta manualmente: wsl --install -d Ubuntu"
     }
-}
-
-# ── Step 3: Clone/Update repo ───────────────────────────
-Header "3/6 · Descargando workspace..."
-
-if (Test-Path (Join-Path $InstallDir ".git")) {
-    Info "Directorio existente. Actualizando..."
-    Push-Location $InstallDir
-    git pull --ff-only 2>$null
-    Pop-Location
 } else {
-    if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
-    git clone $RepoUrl $InstallDir
-}
-Success "Workspace descargado: $InstallDir"
-
-# ── Step 4: Copy workspace to OpenClaw ──────────────────
-Header "4/6 · Instalando workspace personalizado..."
-
-# Create dirs
-foreach ($d in @("skills", "memory", "documents")) {
-    $p = Join-Path $OpenClawWorkspace $d
-    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
-}
-
-# Core workspace files (always overwrite)
-foreach ($f in @("SOUL.md", "AGENTS.md", "TOOLS.md", "HEARTBEAT.md")) {
-    Copy-Item -Force (Join-Path $InstallDir "workspace\$f") (Join-Path $OpenClawWorkspace $f)
-}
-
-# USER.md: only copy if not exists
-$userMd = Join-Path $OpenClawWorkspace "USER.md"
-if (-not (Test-Path $userMd)) {
-    Copy-Item (Join-Path $InstallDir "workspace\USER.md") $userMd
-}
-
-# MEMORY.md: never overwrite
-$memMd = Join-Path $OpenClawWorkspace "MEMORY.md"
-if (-not (Test-Path $memMd)) { "" | Out-File -Encoding utf8 $memMd }
-
-# Copy skills
-Copy-Item -Recurse -Force (Join-Path $InstallDir "workspace\skills\*") (Join-Path $OpenClawWorkspace "skills\")
-
-# Clean residual onboard files
-foreach ($r in @("BOOTSTRAP.md", "IDENTITY.md")) {
-    $rp = Join-Path $OpenClawWorkspace $r
-    if (Test-Path $rp) { Remove-Item -Force $rp }
-}
-
-Success "Workspace instalado en: $OpenClawWorkspace"
-
-# ── Step 5: API Key + Channel ───────────────────────────
-Header "5/6 · Configuración..."
-
-$SkipConfig = $false
-$ExistingToken = $null
-
-# Check existing config
-if (Test-Path $ConfigFile) {
-    $configContent = Get-Content $ConfigFile -Raw -ErrorAction SilentlyContinue
-    # Try to extract existing token
-    if ($configContent -match '"token"\s*:\s*"([^"]+)"') {
-        $ExistingToken = $Matches[1]
-    }
-
-    if ($configContent -match "relaygpu") {
-        Info "Configuración de DocuMentor detectada."
-        $reconfig = Read-Host "  ¿Reconfigurar? [s/N]"
-        if ($reconfig -notin @("s", "si", "sí")) {
-            Info "Manteniendo configuración actual."
-            $SkipConfig = $true
-        }
-    } else {
-        Info "Configuración de OpenClaw existente (sin DocuMentor)."
-        $cont = Read-Host "  ¿Sobreescribir con config de DocuMentor? [S/n]"
-        if ($cont -in @("n", "no")) {
-            Info "Saltando configuración."
-            $SkipConfig = $true
-        }
-    }
-}
-
-if (-not $SkipConfig) {
-    # API Key
-    Write-Host ""
-    Write-Host "  Key de OpenGPU Relay"
-    Write-Host "  Consigue una en: https://relaygpu.com"
-    Write-Host ""
-    do {
-        $apiKey = Read-Host "  API Key"
-        if (-not $apiKey) { Warn "La API key no puede estar vacia" }
-    } while (-not $apiKey)
-
-    # Channel
-    Write-Host ""
-    Write-Host "  Canal de comunicacion"
-    Write-Host "  1 - Telegram -- recomendado"
-    Write-Host "  2 - WhatsApp"
-    Write-Host "  3 - Discord"
-    Write-Host "  4 - Omitir por ahora"
-    Write-Host ""
-
-    $channelName = ""
-    $channelToken = ""
-
-    do {
-        $chChoice = Read-Host "  Opcion [1]"
-        if (-not $chChoice) { $chChoice = "1" }
-        switch ($chChoice) {
-            "1" {
-                $channelName = "telegram"
-                Write-Host ""
-                Write-Host "  Crea un bot con @BotFather en Telegram y pega el token:"
-                $channelToken = Read-Host "  Bot Token"
-                break
-            }
-            "2" {
-                $channelName = "whatsapp"
-                Info "WhatsApp mostrara un QR despues del setup"
-                break
-            }
-            "3" {
-                $channelName = "discord"
-                Write-Host ""
-                Write-Host "  Crea un bot en https://discord.com/developers/applications"
-                $channelToken = Read-Host "  Bot Token"
-                break
-            }
-            "4" { break }
-            default { Warn "Elige 1-4" }
-        }
-    } while ($chChoice -notin @("1","2","3","4"))
-
-    # Gateway token
-    if ($ExistingToken) {
-        $gwToken = $ExistingToken
-        Info "Reutilizando token del gateway existente"
-    } else {
-        $gwToken = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Max 256) })
-    }
-
-    # Build config as a PowerShell object, then convert to JSON (avoids here-string parsing issues)
-    $wsPath = $OpenClawWorkspace -replace '\\', '/'
-
-    $config = @{
-        models = @{
-            providers = @{
-                "relaygpu-anthropic" = @{
-                    baseUrl = "https://relay.opengpu.network/v2/anthropic/v1/"
-                    apiKey = $apiKey
-                    api = "anthropic-messages"
-                    models = @(
-                        @{
-                            id = "anthropic/claude-sonnet-4-6"
-                            name = "Claude Sonnet 4-6 (OpenGPU)"
-                            api = "anthropic-messages"
-                            reasoning = $true
-                            input = @("text")
-                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
-                            contextWindow = 200000
-                            maxTokens = 64000
-                        }
-                    )
-                }
-                "relaygpu-openai" = @{
-                    baseUrl = "https://relay.opengpu.network/v2/openai/v1/"
-                    apiKey = $apiKey
-                    api = "openai-completions"
-                    models = @(
-                        @{
-                            id = "moonshotai/kimi-k2.5"
-                            name = "Kimi K2.5 (OpenGPU)"
-                            api = "openai-completions"
-                            reasoning = $true
-                            input = @("text")
-                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
-                            contextWindow = 128000
-                            maxTokens = 65536
-                        },
-                        @{
-                            id = "deepseek-ai/DeepSeek-V3.1"
-                            name = "DeepSeek V3.1 (OpenGPU)"
-                            api = "openai-completions"
-                            reasoning = $true
-                            input = @("text")
-                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
-                            contextWindow = 128000
-                            maxTokens = 65536
-                        }
-                    )
-                }
-            }
-        }
-        agents = @{
-            defaults = @{
-                model = @{ primary = "relaygpu-openai/moonshotai/kimi-k2.5" }
-                workspace = $wsPath
-            }
-        }
-        gateway = @{
-            mode = "local"
-            auth = @{ token = $gwToken }
-        }
-    }
-
-    # Add channel config if selected
-    switch ($channelName) {
-        "telegram" {
-            $config.channels = @{
-                telegram = @{
-                    enabled = $true
-                    botToken = $channelToken
-                    dmPolicy = "allowlist"
-                    allowFrom = @()
-                    groupPolicy = "allowlist"
-                    streaming = "partial"
-                }
-            }
-        }
-        "discord" {
-            $config.channels = @{
-                discord = @{
-                    enabled = $true
-                    botToken = $channelToken
-                    dmPolicy = "allowlist"
-                    allowFrom = @()
-                    groupPolicy = "allowlist"
-                }
-            }
-        }
-        "whatsapp" {
-            $config.channels = @{
-                whatsapp = @{
-                    enabled = $true
-                    dmPolicy = "allowlist"
-                    allowFrom = @()
-                }
-            }
-        }
-    }
-
-    # Ensure config dir exists
-    if (-not (Test-Path $OpenClawConfig)) {
-        New-Item -ItemType Directory -Path $OpenClawConfig -Force | Out-Null
-    }
-
-    # Convert to JSON and write
-    $configJson = $config | ConvertTo-Json -Depth 10
-    $configJson | Out-File -Encoding utf8 $ConfigFile
-    Success "Configuracion guardada: $ConfigFile"
-}
-
-# ── Step 6: Install Python deps + Start ─────────────────
-Header "6/6 · Instalando dependencias y arrancando..."
-
-$pythonDeps = "chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas prompt-guard"
-$pipInstalled = $false
-
-if ($pythonCmd) {
-    Info "Instalando dependencias Python..."
+    Info "WSL2 no detectado. Instalando..."
     try {
-        & $pythonCmd -m pip install -q $pythonDeps.Split(" ") 2>$null
-        $pipInstalled = $true
-    } catch {}
-
-    if (-not $pipInstalled) {
-        try {
-            & $pythonCmd -m pip install --user -q $pythonDeps.Split(" ") 2>$null
-            $pipInstalled = $true
-        } catch {}
+        Write-Host ""
+        Info "Esto puede tardar unos minutos y requerir reinicio del PC."
+        Write-Host ""
+        wsl --install -d Ubuntu --no-launch
+        Write-Host ""
+        Warn "================================================================"
+        Warn "WSL2 + Ubuntu instalados."
+        Warn "REINICIA EL PC y vuelve a ejecutar este instalador."
+        Warn "================================================================"
+        Write-Host ""
+        Read-Host "  Pulsa Enter para salir"
+        exit 0
+    } catch {
+        Fail "No se pudo instalar WSL2: $_`nActiva WSL2 manualmente: https://learn.microsoft.com/windows/wsl/install"
     }
-
-    if ($pipInstalled) {
-        Success "Dependencias Python instaladas"
-    } else {
-        Warn "No se pudieron instalar algunas dependencias."
-        Warn "Prueba manualmente: $pythonCmd -m pip install $pythonDeps"
-    }
-} else {
-    Warn "Python no disponible. Instala las dependencias manualmente."
 }
 
-# Start gateway
-Info "Iniciando OpenClaw Gateway..."
+# ── Step 2: Run Linux installer inside WSL ──────────────
+Header "2/3 - Ejecutando instalador de DocuMentor en WSL..."
+
+Info "Lanzando install.sh dentro de WSL ($wslDistro)..."
+Write-Host ""
+
 try {
-    openclaw doctor --repair 2>$null
-    openclaw gateway install --force 2>$null
-    openclaw gateway restart 2>$null
-    Success "Gateway iniciado"
+    wsl -d $wslDistro -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash"
+    if ($LASTEXITCODE -ne 0) {
+        Fail "El instalador de Linux fallo con codigo $LASTEXITCODE"
+    }
 } catch {
-    Warn "No se pudo iniciar el gateway. Ejecuta: openclaw gateway start"
+    Fail "Error ejecutando el instalador en WSL: $_"
 }
 
-# ── Done ────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ¡DocuMentor instalado correctamente!" -ForegroundColor Green
-Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Workspace:  $OpenClawWorkspace"
-Write-Host "  Config:     $ConfigFile"
-Write-Host ""
+# ── Step 3: Done ────────────────────────────────────────
+Header "3/3 - Completado"
 
-if ($channelName) {
-    Write-Host "  Canal: $channelName"
-    Write-Host ""
-    Write-Host "  IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
-    Write-Host "     $ConfigFile"
-    Write-Host ""
-    Write-Host "     Cómo encontrar tu ID:"
-    Write-Host "     1. Manda un mensaje al bot"
-    Write-Host "     2. Mira los logs: openclaw gateway logs | Select -Last 20"
-    Write-Host "     3. Busca tu ID numérico"
-    Write-Host "     4. Añádelo a allowFrom: [`"TU_ID`"]"
-    Write-Host "     5. Reinicia: openclaw gateway restart"
-    Write-Host ""
-}
-
-if ($channelName -eq "whatsapp") {
-    Write-Host "  Para vincular WhatsApp: openclaw channels login"
-    Write-Host ""
-}
-
-if ($gwToken) {
-    Write-Host "  Token del dashboard: $gwToken"
-    Write-Host "     (guárdalo para acceder al dashboard web de OpenClaw)"
-    Write-Host ""
-}
-
-Write-Host "  Iniciar dashboard visual:"
-Write-Host "     cd $InstallDir; streamlit run dashboard\app.py"
 Write-Host ""
-Write-Host "  DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
+Write-Host "  ======================================================" -ForegroundColor Green
+Write-Host "  DocuMentor instalado correctamente en WSL2!" -ForegroundColor Green
+Write-Host "  ======================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  ─────────────────────────────────────────────"
-Write-Host "  Comandos útiles:"
-Write-Host "     openclaw gateway status     # Ver estado"
-Write-Host "     openclaw gateway restart    # Reiniciar"
-Write-Host "     openclaw gateway logs       # Ver logs"
-Write-Host "     openclaw update             # Actualizar OpenClaw"
+Write-Host "  Para usar DocuMentor, abre WSL:" -ForegroundColor White
+Write-Host "     wsl" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Docs:     https://docs.openclaw.ai"
-Write-Host "  Soporte:  https://discord.gg/clawd"
+Write-Host "  Comandos utiles (dentro de WSL):" -ForegroundColor White
+Write-Host "     openclaw gateway status     # Ver estado" -ForegroundColor Gray
+Write-Host "     openclaw gateway restart    # Reiniciar" -ForegroundColor Gray
+Write-Host "     openclaw gateway logs       # Ver logs" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Dashboard (dentro de WSL):" -ForegroundColor White
+Write-Host "     cd ~/DocuMentor && streamlit run dashboard/app.py" -ForegroundColor Cyan
+Write-Host "     Accede en: http://localhost:8501" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Docs:     https://docs.openclaw.ai" -ForegroundColor Gray
+Write-Host "  Soporte:  https://discord.gg/clawd" -ForegroundColor Gray
 Write-Host ""

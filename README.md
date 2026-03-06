@@ -22,17 +22,20 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell — instala WSL2 + Ubuntu automáticamente):**
 ```powershell
 irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 -OutFile $env:TEMP\dm-install.ps1; & $env:TEMP\dm-install.ps1
 ```
 
+> **Nota:** OpenClaw requiere WSL2 en Windows. El instalador lo configura automáticamente.
+
 El instalador:
-1. Instala OpenClaw si no lo tienes (+ Node.js, Python y git si faltan)
-2. Descarga el workspace personalizado
-3. Configura los modelos de IA (API key + canal)
-4. Instala dependencias Python
-5. Inicia el sistema
+1. Configura WSL2 con Ubuntu (si no está)
+2. Instala OpenClaw dentro de WSL
+3. Descarga el workspace personalizado
+4. Configura los modelos de IA (API key + canal)
+5. Instala dependencias Python
+6. Inicia el sistema
 
 ### Opción 2: Manual
 
@@ -49,17 +52,13 @@ cd DocuMentor
 ./install.sh
 ```
 
-**Windows (PowerShell):**
+**Windows:**
 ```powershell
-# 1. Instalar OpenClaw
-npm install -g openclaw
+# 1. Instalar WSL2 + Ubuntu (si no lo tienes)
+wsl --install -d Ubuntu
 
-# 2. Clonar este repo
-git clone https://github.com/Asphyksia/DocuMentor.git
-cd DocuMentor
-
-# 3. Ejecutar setup
-.\install.ps1
+# 2. Dentro de WSL, ejecutar el instalador de Linux
+wsl -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash"
 ```
 
 ## Después de instalar
