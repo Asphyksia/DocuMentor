@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.s
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 -OutFile $env:TEMP\dm-install.ps1; & $env:TEMP\dm-install.ps1
 ```
 
 El instalador:

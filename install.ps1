@@ -185,15 +185,36 @@ if (Get-Command openclaw -ErrorAction SilentlyContinue) {
 } else {
     Info "OpenClaw no encontrado. Instalando..."
     try {
-        npm install -g openclaw 2>&1 | Out-Null
+        $ErrorActionPreference_backup = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        # Run npm in a separate process to avoid pipe/buffer issues
+        $npmProc = Start-Process -FilePath "npm" -ArgumentList "install -g openclaw" `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\openclaw-npm-out.txt" `
+            -RedirectStandardError "$env:TEMP\openclaw-npm-err.txt"
+        $ErrorActionPreference = $ErrorActionPreference_backup
+
+        if ($npmProc.ExitCode -ne 0) {
+            $npmErr = Get-Content "$env:TEMP\openclaw-npm-err.txt" -Raw -ErrorAction SilentlyContinue
+            Warn "npm salió con código $($npmProc.ExitCode)"
+            if ($npmErr) { Warn $npmErr }
+        }
+
         # Refresh PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
         if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
+        # Also check npm prefix
+        try {
+            $npmPrefix = (npm config get prefix 2>$null).Trim()
+            if ($npmPrefix -and (Test-Path $npmPrefix) -and ($env:PATH -notlike "*$npmPrefix*")) {
+                $env:PATH = "$npmPrefix;$env:PATH"
+            }
+        } catch {}
 
-        if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) {
+        if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+            Success "OpenClaw instalado"
+        } else {
             Fail "OpenClaw no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
         }
-        Success "OpenClaw instalado"
     } catch {
         Fail "Error instalando OpenClaw: $_"
     }
