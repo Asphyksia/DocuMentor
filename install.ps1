@@ -303,29 +303,28 @@ if (Test-Path $ConfigFile) {
 if (-not $SkipConfig) {
     # API Key
     Write-Host ""
-    Write-Host "  🔑 API Key de OpenGPU Relay"
+    Write-Host "  Key de OpenGPU Relay"
     Write-Host "  Consigue una en: https://relaygpu.com"
     Write-Host ""
     do {
         $apiKey = Read-Host "  API Key"
-        if (-not $apiKey) { Warn "La API key no puede estar vacía" }
+        if (-not $apiKey) { Warn "La API key no puede estar vacia" }
     } while (-not $apiKey)
 
     # Channel
     Write-Host ""
-    Write-Host "  💬 Canal de comunicación"
-    Write-Host "  1) Telegram (recomendado)"
-    Write-Host "  2) WhatsApp"
-    Write-Host "  3) Discord"
-    Write-Host "  4) Omitir por ahora"
+    Write-Host "  Canal de comunicacion"
+    Write-Host "  1 - Telegram -- recomendado"
+    Write-Host "  2 - WhatsApp"
+    Write-Host "  3 - Discord"
+    Write-Host "  4 - Omitir por ahora"
     Write-Host ""
 
     $channelName = ""
     $channelToken = ""
-    $channelJson = ""
 
     do {
-        $chChoice = Read-Host "  Opción [1]"
+        $chChoice = Read-Host "  Opcion [1]"
         if (-not $chChoice) { $chChoice = "1" }
         switch ($chChoice) {
             "1" {
@@ -337,7 +336,7 @@ if (-not $SkipConfig) {
             }
             "2" {
                 $channelName = "whatsapp"
-                Info "WhatsApp mostrará un QR después del setup"
+                Info "WhatsApp mostrara un QR despues del setup"
                 break
             }
             "3" {
@@ -360,125 +359,115 @@ if (-not $SkipConfig) {
         $gwToken = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Max 256) })
     }
 
-    # Build channel config block
-    switch ($channelName) {
-        "telegram" {
-            $channelJson = @"
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "botToken": "$channelToken",
-      "dmPolicy": "allowlist",
-      "allowFrom": [],
-      "groupPolicy": "allowlist",
-      "streaming": "partial"
-    }
-  },
-"@
+    # Build config as a PowerShell object, then convert to JSON (avoids here-string parsing issues)
+    $wsPath = $OpenClawWorkspace -replace '\\', '/'
+
+    $config = @{
+        models = @{
+            providers = @{
+                "relaygpu-anthropic" = @{
+                    baseUrl = "https://relay.opengpu.network/v2/anthropic/v1/"
+                    apiKey = $apiKey
+                    api = "anthropic-messages"
+                    models = @(
+                        @{
+                            id = "anthropic/claude-sonnet-4-6"
+                            name = "Claude Sonnet 4-6 (OpenGPU)"
+                            api = "anthropic-messages"
+                            reasoning = $true
+                            input = @("text")
+                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
+                            contextWindow = 200000
+                            maxTokens = 64000
+                        }
+                    )
+                }
+                "relaygpu-openai" = @{
+                    baseUrl = "https://relay.opengpu.network/v2/openai/v1/"
+                    apiKey = $apiKey
+                    api = "openai-completions"
+                    models = @(
+                        @{
+                            id = "moonshotai/kimi-k2.5"
+                            name = "Kimi K2.5 (OpenGPU)"
+                            api = "openai-completions"
+                            reasoning = $true
+                            input = @("text")
+                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
+                            contextWindow = 128000
+                            maxTokens = 65536
+                        },
+                        @{
+                            id = "deepseek-ai/DeepSeek-V3.1"
+                            name = "DeepSeek V3.1 (OpenGPU)"
+                            api = "openai-completions"
+                            reasoning = $true
+                            input = @("text")
+                            cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
+                            contextWindow = 128000
+                            maxTokens = 65536
+                        }
+                    )
+                }
+            }
         }
-        "discord" {
-            $channelJson = @"
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "botToken": "$channelToken",
-      "dmPolicy": "allowlist",
-      "allowFrom": [],
-      "groupPolicy": "allowlist"
-    }
-  },
-"@
+        agents = @{
+            defaults = @{
+                model = @{ primary = "relaygpu-openai/moonshotai/kimi-k2.5" }
+                workspace = $wsPath
+            }
         }
-        "whatsapp" {
-            $channelJson = @"
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "dmPolicy": "allowlist",
-      "allowFrom": []
-    }
-  },
-"@
+        gateway = @{
+            mode = "local"
+            auth = @{ token = $gwToken }
         }
-        default { $channelJson = "" }
     }
 
-    # Write config
-    $configJson = @"
-{
-  "models": {
-    "providers": {
-      "relaygpu-anthropic": {
-        "baseUrl": "https://relay.opengpu.network/v2/anthropic/v1/",
-        "apiKey": "$apiKey",
-        "api": "anthropic-messages",
-        "models": [
-          {
-            "id": "anthropic/claude-sonnet-4-6",
-            "name": "Claude Sonnet 4-6 (OpenGPU)",
-            "api": "anthropic-messages",
-            "reasoning": true,
-            "input": ["text"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 200000,
-            "maxTokens": 64000
-          }
-        ]
-      },
-      "relaygpu-openai": {
-        "baseUrl": "https://relay.opengpu.network/v2/openai/v1/",
-        "apiKey": "$apiKey",
-        "api": "openai-completions",
-        "models": [
-          {
-            "id": "moonshotai/kimi-k2.5",
-            "name": "Kimi K2.5 (OpenGPU)",
-            "api": "openai-completions",
-            "reasoning": true,
-            "input": ["text"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 128000,
-            "maxTokens": 65536
-          },
-          {
-            "id": "deepseek-ai/DeepSeek-V3.1",
-            "name": "DeepSeek V3.1 (OpenGPU)",
-            "api": "openai-completions",
-            "reasoning": true,
-            "input": ["text"],
-            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-            "contextWindow": 128000,
-            "maxTokens": 65536
-          }
-        ]
-      }
+    # Add channel config if selected
+    switch ($channelName) {
+        "telegram" {
+            $config.channels = @{
+                telegram = @{
+                    enabled = $true
+                    botToken = $channelToken
+                    dmPolicy = "allowlist"
+                    allowFrom = @()
+                    groupPolicy = "allowlist"
+                    streaming = "partial"
+                }
+            }
+        }
+        "discord" {
+            $config.channels = @{
+                discord = @{
+                    enabled = $true
+                    botToken = $channelToken
+                    dmPolicy = "allowlist"
+                    allowFrom = @()
+                    groupPolicy = "allowlist"
+                }
+            }
+        }
+        "whatsapp" {
+            $config.channels = @{
+                whatsapp = @{
+                    enabled = $true
+                    dmPolicy = "allowlist"
+                    allowFrom = @()
+                }
+            }
+        }
     }
-  },
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "relaygpu-openai/moonshotai/kimi-k2.5"
-      },
-      "workspace": "$($OpenClawWorkspace -replace '\\', '/')"
-    }
-  },
-$channelJson
-  "gateway": {
-    "mode": "local",
-    "auth": {
-      "token": "$gwToken"
-    }
-  }
-}
-"@
 
     # Ensure config dir exists
     if (-not (Test-Path $OpenClawConfig)) {
         New-Item -ItemType Directory -Path $OpenClawConfig -Force | Out-Null
     }
 
+    # Convert to JSON and write
+    $configJson = $config | ConvertTo-Json -Depth 10
     $configJson | Out-File -Encoding utf8 $ConfigFile
-    Success "Configuración guardada: $ConfigFile"
+    Success "Configuracion guardada: $ConfigFile"
 }
 
 # ── Step 6: Install Python deps + Start ─────────────────
