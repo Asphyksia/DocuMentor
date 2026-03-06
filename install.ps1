@@ -40,15 +40,27 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
     Success "Node.js: $nodeVer"
 } else {
     Warn "Node.js no encontrado."
-    Info "Instalando Node.js via winget..."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>$null
-        # Refresh PATH
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-        if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-            Fail "Node.js no se instaló correctamente. Instálalo manualmente: https://nodejs.org"
+        Info "Instalando Node.js via winget..."
+        try {
+            $wingetOut = winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements 2>&1
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+            # Check common Node paths
+            $nodePaths = @("$env:ProgramFiles\nodejs", "${env:ProgramFiles(x86)}\nodejs")
+            foreach ($np in $nodePaths) {
+                if ((Test-Path "$np\node.exe") -and ($env:PATH -notlike "*$np*")) {
+                    $env:PATH = "$np;$env:PATH"
+                    break
+                }
+            }
+            if (Get-Command node -ErrorAction SilentlyContinue) {
+                Success "Node.js instalado"
+            } else {
+                Fail "Node.js no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
+            }
+        } catch {
+            Fail "Error instalando Node.js: $_`nInstálalo manualmente: https://nodejs.org"
         }
-        Success "Node.js instalado"
     } else {
         Fail "winget no disponible. Instala Node.js manualmente: https://nodejs.org"
     }
@@ -58,16 +70,29 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
 if (Get-Command git -ErrorAction SilentlyContinue) {
     Success "git disponible"
 } else {
-    Info "Instalando git via winget..."
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements 2>$null
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Fail "git no se instaló correctamente. Instálalo manualmente: https://git-scm.com"
+        Info "Instalando git via winget..."
+        try {
+            $wingetOut = winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements 2>&1
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+            # Check common git paths
+            $gitPaths = @("$env:ProgramFiles\Git\cmd", "${env:ProgramFiles(x86)}\Git\cmd")
+            foreach ($gp in $gitPaths) {
+                if ((Test-Path "$gp\git.exe") -and ($env:PATH -notlike "*$gp*")) {
+                    $env:PATH = "$gp;$env:PATH"
+                    break
+                }
+            }
+            if (Get-Command git -ErrorAction SilentlyContinue) {
+                Success "git instalado"
+            } else {
+                Fail "git no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
+            }
+        } catch {
+            Fail "Error instalando git: $_`nInstálalo manualmente: https://git-scm.com"
         }
-        Success "git instalado"
     } else {
-        Fail "git no encontrado. Instálalo manualmente: https://git-scm.com"
+        Fail "git no encontrado y winget no disponible. Instálalo manualmente: https://git-scm.com"
     }
 }
 
@@ -86,19 +111,46 @@ if (-not $pythonCmd -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
 }
 if (-not $pythonCmd) {
     Warn "Python3 no encontrado."
-    Info "Instalando Python via winget..."
+    $pyInstalled = $false
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements 2>$null
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
-        if (Get-Command python -ErrorAction SilentlyContinue) {
-            $pythonCmd = "python"
-            Success "Python instalado"
-        } else {
-            Warn "Python no se instaló correctamente. El dashboard no funcionará."
-            Warn "Instálalo manualmente: https://www.python.org/downloads/"
+        Info "Instalando Python via winget..."
+        try {
+            $wingetOut = winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements 2>&1
+            # Refresh PATH after install
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+            # Also check common Python install locations
+            $pyPaths = @(
+                "$env:LOCALAPPDATA\Programs\Python\Python312",
+                "$env:LOCALAPPDATA\Programs\Python\Python311",
+                "$env:LOCALAPPDATA\Programs\Python\Python310",
+                "$env:ProgramFiles\Python312",
+                "$env:ProgramFiles\Python311"
+            )
+            foreach ($pp in $pyPaths) {
+                if ((Test-Path "$pp\python.exe") -and ($env:PATH -notlike "*$pp*")) {
+                    $env:PATH = "$pp;$pp\Scripts;$env:PATH"
+                    break
+                }
+            }
+
+            if (Get-Command python -ErrorAction SilentlyContinue) {
+                $pythonCmd = "python"
+                $pyInstalled = $true
+                Success "Python instalado"
+            }
+        } catch {
+            Warn "winget no pudo instalar Python: $_"
         }
-    } else {
-        Warn "Instala Python manualmente: https://www.python.org/downloads/"
+    }
+    if (-not $pyInstalled) {
+        Warn "Python no está instalado. El dashboard y procesamiento de docs no funcionarán."
+        Warn "Instálalo manualmente desde: https://www.python.org/downloads/"
+        Warn "Marca 'Add Python to PATH' durante la instalación."
+        Write-Host ""
+        $cont = Read-Host "  ¿Continuar sin Python? [S/n]"
+        if ($cont -in @("n", "no")) {
+            Fail "Instalación cancelada. Instala Python y vuelve a ejecutar el script."
+        }
     }
 }
 
