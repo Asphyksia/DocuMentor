@@ -96,18 +96,33 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     }
 }
 
-# Check Python
+# Check Python (Windows has a fake "python" alias that redirects to MS Store — must handle carefully)
 $pythonCmd = $null
-if (Get-Command python -ErrorAction SilentlyContinue) {
-    $pyVer = python --version 2>&1
-    if ($pyVer -match "Python 3") {
+try {
+    $ErrorActionPreference_backup = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $pyVer = & python --version 2>&1
+    $ErrorActionPreference = $ErrorActionPreference_backup
+    if ($LASTEXITCODE -eq 0 -and "$pyVer" -match "Python 3") {
         $pythonCmd = "python"
         Success "Python: $pyVer"
     }
+} catch {
+    $ErrorActionPreference = "Stop"
 }
-if (-not $pythonCmd -and (Get-Command python3 -ErrorAction SilentlyContinue)) {
-    $pythonCmd = "python3"
-    Success "Python: $(python3 --version)"
+if (-not $pythonCmd) {
+    try {
+        $ErrorActionPreference_backup = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $pyVer = & python3 --version 2>&1
+        $ErrorActionPreference = $ErrorActionPreference_backup
+        if ($LASTEXITCODE -eq 0 -and "$pyVer" -match "Python 3") {
+            $pythonCmd = "python3"
+            Success "Python: $pyVer"
+        }
+    } catch {
+        $ErrorActionPreference = "Stop"
+    }
 }
 if (-not $pythonCmd) {
     Warn "Python3 no encontrado."
