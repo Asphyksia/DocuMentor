@@ -114,7 +114,8 @@ Info "Lanzando install.sh dentro de WSL ($wslDistro)..."
 Write-Host ""
 
 try {
-    wsl -d $wslDistro -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash"
+    # Download first, then execute — pipe breaks stdin (interactive prompts need it)
+    wsl -d $wslDistro -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh"
     if ($LASTEXITCODE -ne 0) {
         Fail "El instalador de Linux fallo con codigo $LASTEXITCODE"
     }

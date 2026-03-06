@@ -19,7 +19,7 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 
 **Linux / macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh
 ```
 
 **Windows (PowerShell — instala WSL2 + Ubuntu automáticamente):**
@@ -58,7 +58,7 @@ cd DocuMentor
 wsl --install -d Ubuntu
 
 # 2. Dentro de WSL, ejecutar el instalador de Linux
-wsl -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh | bash"
+wsl -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh"
 ```
 
 ## Después de instalar
