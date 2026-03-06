@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     DocuMentor — One-Command Installer for Windows
@@ -11,10 +11,10 @@
 $ErrorActionPreference = "Stop"
 
 # ── Colors ──────────────────────────────────────────────
-function Info($msg)    { Write-Host "  ℹ $msg" -ForegroundColor Cyan }
-function Success($msg) { Write-Host "  ✓ $msg" -ForegroundColor Green }
-function Warn($msg)    { Write-Host "  ⚠ $msg" -ForegroundColor Yellow }
-function Fail($msg)    { Write-Host "  ✗ $msg" -ForegroundColor Red; exit 1 }
+function Info($msg)    { Write-Host "  [i] $msg" -ForegroundColor Cyan }
+function Success($msg) { Write-Host "  [OK] $msg" -ForegroundColor Green }
+function Warn($msg)    { Write-Host "  [!] $msg" -ForegroundColor Yellow }
+function Fail($msg)    { Write-Host "  [X] $msg" -ForegroundColor Red; exit 1 }
 function Header($msg)  { Write-Host "`n  $msg`n" -ForegroundColor White -BackgroundColor DarkBlue }
 
 $RepoUrl          = "https://github.com/Asphyksia/DocuMentor.git"
@@ -26,7 +26,7 @@ $ConfigFile       = Join-Path $OpenClawConfig "openclaw.json"
 # ── Banner ──────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════════╗" -ForegroundColor White
-Write-Host "  ║  📄 DocuMentor — Instalador (Windows)         ║" -ForegroundColor White
+Write-Host "  ║  DocuMentor — Instalador (Windows)         ║" -ForegroundColor White
 Write-Host "  ║  Inteligencia documental con IA               ║" -ForegroundColor White
 Write-Host "  ╚═══════════════════════════════════════════════╝" -ForegroundColor White
 Write-Host ""
@@ -514,17 +514,17 @@ try {
 # ── Done ────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ✅ ¡DocuMentor instalado correctamente!" -ForegroundColor Green
+Write-Host "  ¡DocuMentor instalado correctamente!" -ForegroundColor Green
 Write-Host "  ══════════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
-Write-Host "  📄 Workspace:  $OpenClawWorkspace"
-Write-Host "  ⚙️  Config:     $ConfigFile"
+Write-Host "  Workspace:  $OpenClawWorkspace"
+Write-Host "  Config:     $ConfigFile"
 Write-Host ""
 
 if ($channelName) {
-    Write-Host "  💬 Canal: $channelName"
+    Write-Host "  Canal: $channelName"
     Write-Host ""
-    Write-Host "  ⚠️  IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
+    Write-Host "  IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
     Write-Host "     $ConfigFile"
     Write-Host ""
     Write-Host "     Cómo encontrar tu ID:"
@@ -537,20 +537,20 @@ if ($channelName) {
 }
 
 if ($channelName -eq "whatsapp") {
-    Write-Host "  📱 Para vincular WhatsApp: openclaw channels login"
+    Write-Host "  Para vincular WhatsApp: openclaw channels login"
     Write-Host ""
 }
 
 if ($gwToken) {
-    Write-Host "  🔑 Token del dashboard: $gwToken"
+    Write-Host "  Token del dashboard: $gwToken"
     Write-Host "     (guárdalo para acceder al dashboard web de OpenClaw)"
     Write-Host ""
 }
 
-Write-Host "  📊 Iniciar dashboard visual:"
+Write-Host "  Iniciar dashboard visual:"
 Write-Host "     cd $InstallDir; streamlit run dashboard\app.py"
 Write-Host ""
-Write-Host "  🎓 DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
+Write-Host "  DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
 Write-Host ""
 Write-Host "  ─────────────────────────────────────────────"
 Write-Host "  Comandos útiles:"
@@ -559,6 +559,6 @@ Write-Host "     openclaw gateway restart    # Reiniciar"
 Write-Host "     openclaw gateway logs       # Ver logs"
 Write-Host "     openclaw update             # Actualizar OpenClaw"
 Write-Host ""
-Write-Host "  📖 Docs:     https://docs.openclaw.ai"
-Write-Host "  💬 Soporte:  https://discord.gg/clawd"
+Write-Host "  Docs:     https://docs.openclaw.ai"
+Write-Host "  Soporte:  https://discord.gg/clawd"
 Write-Host ""
