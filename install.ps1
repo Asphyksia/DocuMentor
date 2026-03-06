@@ -183,26 +183,22 @@ if (Get-Command openclaw -ErrorAction SilentlyContinue) {
     $clawVer = openclaw --version 2>&1
     Success "OpenClaw ya instalado ($clawVer)"
 } else {
-    Info "OpenClaw no encontrado. Instalando..."
+    Info "OpenClaw no encontrado. Instalando con el instalador oficial..."
     try {
         $ErrorActionPreference_backup = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        # Run npm in a separate process to avoid pipe/buffer issues
-        $npmProc = Start-Process -FilePath "npm" -ArgumentList "install -g openclaw" `
-            -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\openclaw-npm-out.txt" `
-            -RedirectStandardError "$env:TEMP\openclaw-npm-err.txt"
-        $ErrorActionPreference = $ErrorActionPreference_backup
 
-        if ($npmProc.ExitCode -ne 0) {
-            $npmErr = Get-Content "$env:TEMP\openclaw-npm-err.txt" -Raw -ErrorAction SilentlyContinue
-            Warn "npm salió con código $($npmProc.ExitCode)"
-            if ($npmErr) { Warn $npmErr }
-        }
+        # Download and run the official OpenClaw Windows installer
+        $clawInstaller = "$env:TEMP\openclaw-install.ps1"
+        Invoke-WebRequest -Uri "https://openclaw.ai/install.ps1" -OutFile $clawInstaller -UseBasicParsing
+        & $clawInstaller -NoOnboard
+
+        $ErrorActionPreference = $ErrorActionPreference_backup
 
         # Refresh PATH
         $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
         if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
-        # Also check npm prefix
+        # Check npm prefix
         try {
             $npmPrefix = (npm config get prefix 2>$null).Trim()
             if ($npmPrefix -and (Test-Path $npmPrefix) -and ($env:PATH -notlike "*$npmPrefix*")) {
@@ -213,10 +209,24 @@ if (Get-Command openclaw -ErrorAction SilentlyContinue) {
         if (Get-Command openclaw -ErrorAction SilentlyContinue) {
             Success "OpenClaw instalado"
         } else {
-            Fail "OpenClaw no se encontró después de instalar. Cierra y abre PowerShell, luego ejecuta este script de nuevo."
+            # Fallback: try npm directly with env var to skip native builds
+            Warn "Instalador oficial no encontró openclaw en PATH. Intentando npm directo..."
+            $env:SHARP_IGNORE_GLOBAL_LIBVIPS = "1"
+            $npmProc = Start-Process -FilePath "npm" -ArgumentList "install -g openclaw@latest" `
+                -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$env:TEMP\openclaw-npm-out.txt" `
+                -RedirectStandardError "$env:TEMP\openclaw-npm-err.txt"
+
+            $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH", "User")
+            if (Test-Path $npmGlobal) { $env:PATH = "$npmGlobal;$env:PATH" }
+
+            if (Get-Command openclaw -ErrorAction SilentlyContinue) {
+                Success "OpenClaw instalado via npm"
+            } else {
+                Fail "OpenClaw no se pudo instalar. Prueba manualmente:`n  npm install -g openclaw@latest`nO considera usar WSL2: https://learn.microsoft.com/windows/wsl/install"
+            }
         }
     } catch {
-        Fail "Error instalando OpenClaw: $_"
+        Fail "Error instalando OpenClaw: $_`nConsidera usar WSL2: https://learn.microsoft.com/windows/wsl/install"
     }
 }
 
