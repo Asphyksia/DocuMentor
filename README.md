@@ -56,12 +56,21 @@ El desinstalador pregunta qué quieres eliminar: solo DocuMentor, la config de O
 
 ## Dashboard
 
-```bash
-cd ~/DocuMentor
-streamlit run dashboard/app.py
+**Windows:**
+```powershell
+cd $env:USERPROFILE\DocuMentor
+.\dashboard.cmd
 ```
 
-Accede en: **http://localhost:8501**
+**Linux / macOS:**
+```bash
+cd ~/DocuMentor
+bash dashboard.sh
+```
+
+Se abre automáticamente en: **http://localhost:8501**
+
+> El launcher busca el entorno virtual automáticamente. Si no encuentra Streamlit, te indica qué hacer.
 
 ### Tabs
 
