@@ -95,25 +95,51 @@ Comprueba si las dependencias están disponibles:
 python3 -c "import chromadb, pdfplumber, openpyxl, docx, streamlit, pandas" 2>&1
 ```
 
-Si falla (ImportError), instálalas automáticamente con un venv:
+Si falla (ImportError), instálalas paso a paso, comunicando progreso al usuario entre cada una.
+
+Primero, prepara el entorno:
 
 ```bash
 VENV="$HOME/DocuMentor/.venv"
 python3 -m venv "$VENV" 2>/dev/null || python3 -m venv --system-site-packages "$VENV"
-"$VENV/bin/pip" install -q chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas prompt-guard
 ```
 
 Si `python3 -m venv` no está disponible, instálalo primero:
 - Linux/WSL: `sudo apt-get install -y python3-venv python3-full`
 - macOS: `brew install python3`
 
-Comunica al usuario solo:
+Mensaje inicial:
 ```
-"Estoy preparando el entorno. Un momento..."
+"Perfecto, {user_name}. Voy a preparar el sistema. Te iré contando."
 ```
-(para instalaciones rápidas) o si tarda más de 5 segundos:
+
+Luego instala las dependencias **una por una o en grupos pequeños**, enviando un mensaje breve después de cada instalación:
+
+```bash
+"$VENV/bin/pip" install -q chromadb
 ```
-"Instalando componentes necesarios, esto puede tardar un minuto..."
+→ "✓ Motor de búsqueda instalado"
+
+```bash
+"$VENV/bin/pip" install -q pdfplumber openpyxl python-docx
+```
+→ "✓ Procesamiento de documentos listo (PDF, Excel, Word)"
+
+```bash
+"$VENV/bin/pip" install -q streamlit pandas matplotlib
+```
+→ "✓ Dashboard y visualización listos"
+
+```bash
+"$VENV/bin/pip" install -q prompt-guard
+```
+→ "✓ Seguridad configurada"
+
+**IMPORTANTE:** Envía cada mensaje de confirmación al usuario ANTES de empezar la siguiente instalación. No esperes a tenerlo todo — el usuario debe ver que algo está pasando.
+
+Si alguna instalación falla, informa al usuario:
+```
+"⚠ No pude instalar [componente]. No es crítico, pero [funcionalidad] no estará disponible. Puedes intentarlo más tarde."
 ```
 
 #### 6b — Inicializar motor de búsqueda
@@ -126,9 +152,11 @@ VENV="$HOME/DocuMentor/.venv"
 # Si no hay venv, intenta: python3 skills/rag-search/scripts/setup_rag.py
 ```
 
-Comunica al usuario solo cuando todo esté listo:
+→ "✓ Motor de búsqueda configurado"
+
+Mensaje final:
 ```
-"Todo listo."
+"¡Todo listo! Ya puedes subir tu primer documento."
 ```
 
 Si el usuario pregunta detalles técnicos, explica: motor de búsqueda semántica local, sin enviar datos a terceros.
