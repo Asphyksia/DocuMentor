@@ -95,7 +95,7 @@ def run_search(query: str, top_k: int = 5) -> dict:
     """Run ChromaDB search via the rag-search script."""
     try:
         result = subprocess.run(
-            ["python3", str(SEARCH_SCRIPT), query, "--top-k", str(top_k)],
+            [find_python(), str(SEARCH_SCRIPT), query, "--top-k", str(top_k)],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0:
@@ -110,24 +110,28 @@ def run_search(query: str, top_k: int = 5) -> dict:
     except Exception as e:
         return {"error": str(e), "results": []}
 
+def find_python() -> str:
+    """Find the best Python executable (venv first, then system)."""
+    import sys
+    # Check venv locations
+    for venv_dir in [
+        WORKSPACE / ".venv",
+        Path(__file__).parent.parent / ".venv",
+        Path.home() / "DocuMentor" / ".venv",
+        Path.home() / ".openclaw" / "workspace" / ".venv",
+    ]:
+        for py_name in ["Scripts/python.exe", "bin/python3", "bin/python"]:
+            py = venv_dir / py_name
+            if py.exists():
+                return str(py)
+    # Use the same Python running this dashboard
+    return sys.executable
+
+
 def process_document(file_path: str) -> dict:
     """Run the full document processing pipeline."""
     try:
-        # Find python from venv
-        venv_python = None
-        for venv_dir in [
-            WORKSPACE / ".venv",
-            Path(__file__).parent.parent / ".venv",
-            Path.home() / "DocuMentor" / ".venv",
-        ]:
-            py = venv_dir / "bin" / "python3"
-            if not py.exists():
-                py = venv_dir / "Scripts" / "python.exe"
-            if py.exists():
-                venv_python = str(py)
-                break
-
-        python_cmd = venv_python or "python3"
+        python_cmd = find_python()
 
         result = subprocess.run(
             [python_cmd, str(PROCESS_SCRIPT), file_path],
