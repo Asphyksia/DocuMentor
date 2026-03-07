@@ -13,10 +13,19 @@ The agent only needs to call THIS script. Everything else is automatic.
 """
 
 import sys
+import os
 import json
 import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
+
+# Force UTF-8 output on Windows (avoids cp1252 emoji encoding errors)
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def find_workspace():

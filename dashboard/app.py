@@ -94,9 +94,10 @@ def load_api_key() -> str:
 def run_search(query: str, top_k: int = 5) -> dict:
     """Run ChromaDB search via the rag-search script."""
     try:
+        env = {**subprocess.os.environ, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(
             [find_python(), str(SEARCH_SCRIPT), query, "--top-k", str(top_k)],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, env=env
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
@@ -133,9 +134,10 @@ def process_document(file_path: str) -> dict:
     try:
         python_cmd = find_python()
 
+        env = {**subprocess.os.environ, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(
             [python_cmd, str(PROCESS_SCRIPT), file_path],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=120, env=env
         )
 
         # Parse RESULT_JSON from output
