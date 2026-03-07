@@ -5,6 +5,7 @@ set -euo pipefail
 #  DocuMentor — Installer
 #  Step 1: Install OpenClaw (if needed)
 #  Step 2: Copy DocuMentor workspace + skills
+#  Step 3: Configure API key + channel
 #  Python deps are installed by the bot on first conversation.
 # ─────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 
 # ── Step 1: Install OpenClaw ────────────────────────────
-header "1/2 · OpenClaw..."
+header "1/3 · OpenClaw..."
 
 export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
 [[ -f "$HOME/.bashrc" ]] && source "$HOME/.bashrc" 2>/dev/null || true
@@ -60,7 +61,7 @@ else
 fi
 
 # ── Step 2: Clone repo + copy workspace ─────────────────
-header "2/2 · Instalando workspace DocuMentor..."
+header "2/3 · Instalando workspace DocuMentor..."
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Actualizando repo existente..."
@@ -85,6 +86,192 @@ for residual in BOOTSTRAP.md IDENTITY.md; do
     [[ -f "$OPENCLAW_WORKSPACE/$residual" ]] && rm -f "$OPENCLAW_WORKSPACE/$residual" || true
 done
 success "Workspace instalado en: $OPENCLAW_WORKSPACE"
+
+# ── Step 3: Configure API key + Channel ─────────────────
+header "3/3 · Configuración..."
+
+CONFIG_FILE="$OPENCLAW_CONFIG_DIR/openclaw.json"
+SKIP_CONFIG=""
+
+if [[ -f "$CONFIG_FILE" ]] && grep -q "relaygpu" "$CONFIG_FILE" 2>/dev/null; then
+    info "Configuración de DocuMentor detectada."
+    echo -n "  ¿Reconfigurar? [s/N]: "
+    read -r reconfig
+    if [[ "${reconfig,,}" != "s" && "${reconfig,,}" != "si" && "${reconfig,,}" != "sí" ]]; then
+        info "Manteniendo configuración actual."
+        SKIP_CONFIG=true
+    fi
+elif [[ -f "$CONFIG_FILE" ]]; then
+    info "Configuración de OpenClaw existente (sin DocuMentor)."
+    echo -n "  ¿Sobreescribir con config de DocuMentor? [S/n]: "
+    read -r cont
+    if [[ "${cont,,}" == "n" || "${cont,,}" == "no" ]]; then
+        info "Manteniendo configuración actual."
+        SKIP_CONFIG=true
+    fi
+fi
+
+# Reuse existing gateway token
+EXISTING_TOKEN=""
+if [[ -f "$CONFIG_FILE" ]]; then
+    EXISTING_TOKEN=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"//' | sed 's/"//')
+fi
+
+if [[ "$SKIP_CONFIG" != "true" ]]; then
+    echo ""
+    echo "  🔑 API Key de OpenGPU Relay"
+    echo "  Consigue una en: https://relaygpu.com"
+    echo ""
+    while true; do
+        echo -n "  API Key: "
+        read -r OPENGPU_API_KEY
+        [[ -n "$OPENGPU_API_KEY" ]] && break
+        warn "La API key no puede estar vacía"
+    done
+
+    echo ""
+    echo "  💬 Canal de comunicación"
+    echo "  1) Telegram (recomendado)"
+    echo "  2) WhatsApp"
+    echo "  3) Discord"
+    echo "  4) Omitir por ahora"
+    echo ""
+    CHANNEL=""
+    CHANNEL_TOKEN=""
+    while true; do
+        echo -n "  Opción [1]: "
+        read -r ch_choice
+        ch_choice=${ch_choice:-1}
+        case $ch_choice in
+            1)
+                CHANNEL="telegram"
+                echo ""
+                echo "  Crea un bot con @BotFather en Telegram y pega el token:"
+                echo -n "  Bot Token: "
+                read -r CHANNEL_TOKEN
+                break ;;
+            2)
+                CHANNEL="whatsapp"
+                CHANNEL_TOKEN=""
+                info "WhatsApp mostrará un QR después del setup"
+                break ;;
+            3)
+                CHANNEL="discord"
+                echo ""
+                echo "  Crea un bot en https://discord.com/developers/applications"
+                echo -n "  Bot Token: "
+                read -r CHANNEL_TOKEN
+                break ;;
+            4) break ;;
+            *) warn "Elige 1-4" ;;
+        esac
+    done
+
+    # Gateway token
+    if [[ -n "${EXISTING_TOKEN:-}" ]]; then
+        GW_TOKEN="$EXISTING_TOKEN"
+    elif command -v openssl &>/dev/null; then
+        GW_TOKEN=$(openssl rand -hex 32)
+    else
+        GW_TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || head -c 32 /dev/urandom | xxd -p | tr -d '\n')
+    fi
+
+    # Build channel JSON
+    CHANNEL_JSON=""
+    case "${CHANNEL:-}" in
+        telegram)
+            CHANNEL_JSON=$(printf '  "channels": {\n    "telegram": {\n      "enabled": true,\n      "botToken": "%s",\n      "dmPolicy": "allowlist",\n      "allowFrom": [],\n      "groupPolicy": "allowlist",\n      "streaming": "partial"\n    }\n  },' "$CHANNEL_TOKEN")
+            ;;
+        discord)
+            CHANNEL_JSON=$(printf '  "channels": {\n    "discord": {\n      "enabled": true,\n      "botToken": "%s",\n      "dmPolicy": "allowlist",\n      "allowFrom": [],\n      "groupPolicy": "allowlist"\n    }\n  },' "$CHANNEL_TOKEN")
+            ;;
+        whatsapp)
+            CHANNEL_JSON=$(printf '  "channels": {\n    "whatsapp": {\n      "enabled": true,\n      "dmPolicy": "allowlist",\n      "allowFrom": []\n    }\n  },')
+            ;;
+    esac
+
+    # Write config
+    cat > "$CONFIG_FILE" << CONFIGEOF
+{
+  "models": {
+    "providers": {
+      "relaygpu-anthropic": {
+        "baseUrl": "https://relay.opengpu.network/v2/anthropic/v1/",
+        "apiKey": "${OPENGPU_API_KEY}",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "anthropic/claude-sonnet-4-6",
+            "name": "Claude Sonnet 4-6 (OpenGPU)",
+            "api": "anthropic-messages",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 200000,
+            "maxTokens": 64000
+          }
+        ]
+      },
+      "relaygpu-openai": {
+        "baseUrl": "https://relay.opengpu.network/v2/openai/v1/",
+        "apiKey": "${OPENGPU_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "moonshotai/kimi-k2.5",
+            "name": "Kimi K2.5 (OpenGPU)",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 128000,
+            "maxTokens": 65536
+          },
+          {
+            "id": "deepseek-ai/DeepSeek-V3.1",
+            "name": "DeepSeek V3.1 (OpenGPU)",
+            "api": "openai-completions",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 128000,
+            "maxTokens": 65536
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "relaygpu-openai/moonshotai/kimi-k2.5"
+      },
+      "workspace": "${OPENCLAW_WORKSPACE}"
+    }
+  },
+${CHANNEL_JSON}
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "token": "${GW_TOKEN}"
+    }
+  }
+}
+CONFIGEOF
+
+    success "Configuración guardada: $CONFIG_FILE"
+
+    if [[ -n "${CHANNEL:-}" ]]; then
+        echo ""
+        warn "IMPORTANTE: Añade tu ID de usuario a 'allowFrom' en:"
+        echo "     $CONFIG_FILE"
+        echo ""
+        echo "     1. Manda un mensaje al bot"
+        echo "     2. Mira los logs: openclaw gateway logs | tail -20"
+        echo "     3. Busca tu ID numérico"
+        echo "     4. Añádelo a allowFrom y reinicia: openclaw gateway restart"
+    fi
+fi
 
 # ── Start gateway ───────────────────────────────────────
 if command -v openclaw &>/dev/null; then
