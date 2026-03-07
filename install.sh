@@ -393,39 +393,71 @@ fi
 # ── Step 6: Install Python deps + Start ─────────────────
 header "6/6 · Instalando dependencias y arrancando..."
 
-# Install Python dependencies
+# Install Python dependencies using a virtual environment (PEP 668 compliance)
 PYTHON_DEPS="chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas prompt-guard"
 PIP_INSTALLED=false
+VENV_DIR="$INSTALL_DIR/.venv"
 
-if command -v pip3 &>/dev/null; then
-    PIP_CMD="pip3"
-elif python3 -m pip --version &>/dev/null 2>&1; then
-    PIP_CMD="python3 -m pip"
-else
-    PIP_CMD=""
-fi
+if command -v python3 &>/dev/null; then
+    # Ensure python3-venv is available
+    if ! python3 -m venv --help &>/dev/null 2>&1; then
+        info "Instalando python3-venv..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get install -y -qq python3-venv 2>/dev/null || true
+        fi
+    fi
 
-if [[ -n "$PIP_CMD" ]]; then
-    info "Instalando dependencias Python..."
-    if $PIP_CMD install -q $PYTHON_DEPS 2>/dev/null; then
-        PIP_INSTALLED=true
-    elif $PIP_CMD install --user -q $PYTHON_DEPS 2>/dev/null; then
-        PIP_INSTALLED=true
-    elif $PIP_CMD install --break-system-packages -q $PYTHON_DEPS 2>/dev/null; then
-        PIP_INSTALLED=true
-    elif $PIP_CMD install --user --break-system-packages -q $PYTHON_DEPS 2>/dev/null; then
-        PIP_INSTALLED=true
+    # Create virtual environment
+    if python3 -m venv --help &>/dev/null 2>&1; then
+        info "Creando entorno virtual en $VENV_DIR..."
+        python3 -m venv "$VENV_DIR" 2>/dev/null
+
+        if [[ -f "$VENV_DIR/bin/pip" ]]; then
+            info "Instalando dependencias Python (esto puede tardar unos minutos)..."
+            "$VENV_DIR/bin/pip" install -q $PYTHON_DEPS 2>/dev/null && PIP_INSTALLED=true
+        fi
+    fi
+
+    # Fallback: try direct pip if venv failed
+    if [[ "$PIP_INSTALLED" != "true" ]]; then
+        info "Intentando instalación directa..."
+        PIP_CMD=""
+        if command -v pip3 &>/dev/null; then
+            PIP_CMD="pip3"
+        elif python3 -m pip --version &>/dev/null 2>&1; then
+            PIP_CMD="python3 -m pip"
+        fi
+
+        if [[ -n "$PIP_CMD" ]]; then
+            if $PIP_CMD install -q $PYTHON_DEPS 2>/dev/null; then
+                PIP_INSTALLED=true
+            elif $PIP_CMD install --user -q $PYTHON_DEPS 2>/dev/null; then
+                PIP_INSTALLED=true
+            elif $PIP_CMD install --break-system-packages -q $PYTHON_DEPS 2>/dev/null; then
+                PIP_INSTALLED=true
+            fi
+        fi
     fi
 
     if [[ "$PIP_INSTALLED" == "true" ]]; then
         success "Dependencias Python instaladas"
+        # Create activation helper
+        cat > "$INSTALL_DIR/activate.sh" <<'ACTIVATE'
+#!/usr/bin/env bash
+# Source this to activate the DocuMentor Python environment
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/.venv/bin/activate" ]]; then
+    source "$SCRIPT_DIR/.venv/bin/activate"
+fi
+ACTIVATE
+        chmod +x "$INSTALL_DIR/activate.sh"
     else
-        warn "No se pudieron instalar algunas dependencias."
-        warn "Prueba manualmente: $PIP_CMD install $PYTHON_DEPS"
+        warn "No se pudieron instalar las dependencias Python."
+        warn "Ejecuta manualmente:"
+        warn "  cd $INSTALL_DIR && python3 -m venv .venv && .venv/bin/pip install $PYTHON_DEPS"
     fi
 else
-    warn "pip no disponible. Instala las dependencias manualmente:"
-    warn "  pip3 install $PYTHON_DEPS"
+    warn "Python3 no disponible. El dashboard no funcionará."
 fi
 
 # Sync service token and start/restart gateway
@@ -479,7 +511,11 @@ if [[ -n "${GW_TOKEN:-}" ]]; then
 fi
 
 echo "  📊 Iniciar dashboard visual:"
-echo "     cd $INSTALL_DIR && streamlit run dashboard/app.py"
+if [[ -f "$INSTALL_DIR/.venv/bin/streamlit" ]]; then
+    echo "     cd $INSTALL_DIR && .venv/bin/streamlit run dashboard/app.py"
+else
+    echo "     cd $INSTALL_DIR && streamlit run dashboard/app.py"
+fi
 echo ""
 echo "  🎓 DocuMentor está listo. ¡Manda un mensaje al bot para empezar!"
 echo ""
