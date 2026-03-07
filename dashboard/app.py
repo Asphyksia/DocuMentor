@@ -17,6 +17,8 @@ from collections import Counter
 DATA_DIR = Path(__file__).parent / "data"
 WORKSPACE = Path(__file__).parent.parent / "workspace"
 SEARCH_SCRIPT = WORKSPACE / "skills" / "rag-search" / "scripts" / "search.py"
+PROCESS_SCRIPT = WORKSPACE / "skills" / "doc-ingest" / "scripts" / "process_document.py"
+DOCUMENTS_DIR = WORKSPACE / "documents"
 
 # Default LLM settings (can be overridden via env vars or sidebar)
 DEFAULT_MODEL = "moonshotai/kimi-k2.5"
@@ -107,6 +109,46 @@ def run_search(query: str, top_k: int = 5) -> dict:
         return {"error": "Respuesta inválida del motor de búsqueda", "results": []}
     except Exception as e:
         return {"error": str(e), "results": []}
+
+def process_document(file_path: str) -> dict:
+    """Run the full document processing pipeline."""
+    try:
+        # Find python from venv
+        venv_python = None
+        for venv_dir in [
+            WORKSPACE / ".venv",
+            Path(__file__).parent.parent / ".venv",
+            Path.home() / "DocuMentor" / ".venv",
+        ]:
+            py = venv_dir / "bin" / "python3"
+            if not py.exists():
+                py = venv_dir / "Scripts" / "python.exe"
+            if py.exists():
+                venv_python = str(py)
+                break
+
+        python_cmd = venv_python or "python3"
+
+        result = subprocess.run(
+            [python_cmd, str(PROCESS_SCRIPT), file_path],
+            capture_output=True, text=True, timeout=120
+        )
+
+        # Parse RESULT_JSON from output
+        for line in result.stdout.split("\n"):
+            if line.startswith("RESULT_JSON:"):
+                return json.loads(line[12:])
+
+        if result.returncode != 0:
+            return {"error": result.stderr.strip() or "Processing failed"}
+
+        return {"status": "ok", "output": result.stdout}
+
+    except subprocess.TimeoutExpired:
+        return {"error": "Procesamiento cancelado por timeout (120s)"}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 def build_rag_context(query: str, top_k: int = 5) -> tuple[str, list[dict]]:
     """Search documents and build context string for the LLM."""
@@ -280,8 +322,8 @@ with st.sidebar:
 
 # ── Main Content ────────────────────────────────────────
 # Tabs — Chat is always available (even without documents)
-tab_chat, tab_overview, tab_explorer, tab_search, tab_charts = st.tabs(
-    ["💬 Chat", "📋 Resumen", "🔍 Explorador", "🔎 Búsqueda", "📊 Gráficos"]
+tab_chat, tab_upload, tab_overview, tab_explorer, tab_search, tab_charts = st.tabs(
+    ["💬 Chat", "📤 Subir", "📋 Resumen", "🔍 Explorador", "🔎 Búsqueda", "📊 Gráficos"]
 )
 
 # ── Tab: Chat ───────────────────────────────────────────
@@ -430,6 +472,84 @@ with tab_chat:
             msg_idx = len(st.session_state.chat_messages) - 1
             if sources:
                 st.session_state.chat_sources[msg_idx] = sources
+
+# ── Tab: Upload ──────────────────────────────────────────
+with tab_upload:
+    st.header("📤 Subir documentos")
+    st.markdown("Sube archivos para procesarlos e indexarlos. Formatos: **PDF, Excel, Word, CSV**.")
+
+    uploaded_files = st.file_uploader(
+        "Arrastra archivos aquí o haz clic para seleccionar",
+        type=["pdf", "xlsx", "xls", "docx", "csv"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    if uploaded_files:
+        # Ensure documents dir exists
+        DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        for uploaded_file in uploaded_files:
+            file_key = f"processed_{uploaded_file.name}_{uploaded_file.size}"
+
+            # Skip if already processed in this session
+            if file_key in st.session_state.get("processed_files", set()):
+                st.success(f"✅ {uploaded_file.name} — ya procesado")
+                continue
+
+            # Save to documents dir
+            save_path = DOCUMENTS_DIR / uploaded_file.name
+            save_path.write_bytes(uploaded_file.getvalue())
+
+            # Process
+            with st.status(f"Procesando {uploaded_file.name}...", expanded=True) as status:
+                st.write("📄 Extrayendo contenido...")
+                result = process_document(str(save_path))
+
+                if result.get("error"):
+                    status.update(label=f"❌ {uploaded_file.name}", state="error")
+                    st.error(f"Error: {result['error']}")
+                else:
+                    # Show results
+                    summary = result.get("summary", {})
+                    chunks = summary.get("chunks", "?")
+                    tables_count = summary.get("tables", 0)
+                    chars = summary.get("total_chars", "?")
+                    fmt = result.get("format", "?").upper()
+
+                    st.write(f"✅ Extraído: {fmt}")
+                    st.write(f"🔍 Indexado: {chunks} fragmentos")
+                    if tables_count:
+                        st.write(f"📊 Tablas encontradas: {tables_count}")
+                    st.write(f"📏 {chars} caracteres")
+
+                    status.update(label=f"✅ {uploaded_file.name}", state="complete")
+
+                    # Mark as processed
+                    if "processed_files" not in st.session_state:
+                        st.session_state.processed_files = set()
+                    st.session_state.processed_files.add(file_key)
+
+        # Refresh data after processing
+        load_documents.clear()
+        load_tables.clear()
+
+        st.markdown("---")
+        st.success(f"📄 {len(uploaded_files)} archivo(s) procesados. Ve al **Chat** para hacer preguntas.")
+        if st.button("🔄 Actualizar dashboard"):
+            st.rerun()
+
+    else:
+        # Show current documents
+        if documents:
+            st.markdown("### Documentos actuales")
+            for doc in documents:
+                fmt = doc.get("format", "?").upper()
+                name = doc.get("filename", "?")
+                chunks = doc.get("summary", {}).get("chunks", 0)
+                st.text(f"  {fmt} · {name} ({chunks} chunks)")
+        else:
+            st.info("No hay documentos todavía. Sube tu primer archivo arriba.")
 
 # ── Tab: Overview ───────────────────────────────────────
 with tab_overview:
