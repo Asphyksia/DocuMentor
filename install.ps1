@@ -233,7 +233,6 @@ if (-not $SkipConfig) {
                             id = "anthropic/claude-sonnet-4-6"
                             name = "Claude Sonnet 4-6 (OpenGPU)"
                             api = "anthropic-messages"
-                            reasoning = $false
                             input = @("text")
                             cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
                             contextWindow = 200000
@@ -250,7 +249,6 @@ if (-not $SkipConfig) {
                             id = "moonshotai/kimi-k2.5"
                             name = "Kimi K2.5 (OpenGPU)"
                             api = "openai-completions"
-                            reasoning = $false
                             input = @("text")
                             cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
                             contextWindow = 128000
@@ -260,7 +258,6 @@ if (-not $SkipConfig) {
                             id = "deepseek-ai/DeepSeek-V3.1"
                             name = "DeepSeek V3.1 (OpenGPU)"
                             api = "openai-completions"
-                            reasoning = $false
                             input = @("text")
                             cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
                             contextWindow = 128000
