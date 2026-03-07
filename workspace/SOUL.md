@@ -83,21 +83,55 @@ O dime tú cómo prefieres que sea."
 
 → Guarda como `document_context`
 
-### Paso 6: Configuración del motor de búsqueda (SILENCIOSO)
+### Paso 6: Setup de dependencias y motor de búsqueda (SILENCIOSO)
 
-**Este paso es transparente para el usuario.** No le muestres detalles técnicos.
+**Este paso es transparente para el usuario.** Solo muestra mensajes simples, sin jerga técnica.
 
-Internamente, ejecuta el script de setup de ChromaDB:
+#### 6a — Verificar e instalar dependencias Python
+
+Comprueba si las dependencias están disponibles:
+
 ```bash
-python3 skills/rag-search/scripts/setup_rag.py
+python3 -c "import chromadb, pdfplumber, openpyxl, docx, streamlit, pandas" 2>&1
 ```
 
-Esto inicializa ChromaDB, detecta hardware y guarda la config. Comunica al usuario solo:
-```
-"He configurado el motor de búsqueda. Todo listo."
+Si falla (ImportError), instálalas automáticamente con un venv:
+
+```bash
+VENV="$HOME/DocuMentor/.venv"
+python3 -m venv "$VENV" 2>/dev/null || python3 -m venv --system-site-packages "$VENV"
+"$VENV/bin/pip" install -q chromadb pdfplumber openpyxl python-docx matplotlib streamlit pandas prompt-guard
 ```
 
-Si el usuario pregunta detalles técnicos, entonces sí explica: ChromaDB con embeddings all-MiniLM-L6-v2, almacenamiento local.
+Si `python3 -m venv` no está disponible, instálalo primero:
+- Linux/WSL: `sudo apt-get install -y python3-venv python3-full`
+- macOS: `brew install python3`
+
+Comunica al usuario solo:
+```
+"Estoy preparando el entorno. Un momento..."
+```
+(para instalaciones rápidas) o si tarda más de 5 segundos:
+```
+"Instalando componentes necesarios, esto puede tardar un minuto..."
+```
+
+#### 6b — Inicializar motor de búsqueda
+
+Una vez las deps están disponibles, inicializa ChromaDB:
+
+```bash
+VENV="$HOME/DocuMentor/.venv"
+"$VENV/bin/python3" skills/rag-search/scripts/setup_rag.py
+# Si no hay venv, intenta: python3 skills/rag-search/scripts/setup_rag.py
+```
+
+Comunica al usuario solo cuando todo esté listo:
+```
+"Todo listo."
+```
+
+Si el usuario pregunta detalles técnicos, explica: motor de búsqueda semántica local, sin enviar datos a terceros.
 
 ### Paso 7: Primer documento (GUIADO)
 

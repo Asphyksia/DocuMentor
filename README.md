@@ -15,51 +15,37 @@ Sistema de inteligencia documental con IA. Sube documentos, haz preguntas en len
 
 ## Instalar
 
-### Opción 1: Un solo comando (recomendado)
+### Un solo comando
 
 **Linux / macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh
 ```
 
-**Windows (PowerShell — instala WSL2 + Ubuntu automáticamente):**
+**Windows (PowerShell):**
 ```powershell
 irm https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.ps1 -OutFile $env:TEMP\dm-install.ps1; & $env:TEMP\dm-install.ps1
 ```
 
-> **Nota:** OpenClaw requiere WSL2 en Windows. El instalador lo configura automáticamente.
+El instalador hace **solo dos cosas**:
+1. Instala OpenClaw si no lo tienes (usa el instalador oficial)
+2. Copia el workspace de DocuMentor
 
-El instalador:
-1. Configura WSL2 con Ubuntu (si no está)
-2. Instala OpenClaw dentro de WSL
-3. Descarga el workspace personalizado
-4. Configura los modelos de IA (API key + canal)
-5. Instala dependencias Python
-6. Inicia el sistema
+Las dependencias Python (ChromaDB, Streamlit, etc.) las instala el propio bot en la primera conversación, de forma transparente.
 
-### Opción 2: Manual
+## Desinstalar
 
 **Linux / macOS:**
 ```bash
-# 1. Instalar OpenClaw
-curl -fsSL https://openclaw.ai/install.sh | bash
-
-# 2. Clonar este repo
-git clone https://github.com/Asphyksia/DocuMentor.git
-cd DocuMentor
-
-# 3. Ejecutar setup
-./install.sh
+bash ~/DocuMentor/uninstall.sh
 ```
 
-**Windows:**
+**Windows (PowerShell):**
 ```powershell
-# 1. Instalar WSL2 + Ubuntu (si no lo tienes)
-wsl --install -d Ubuntu
-
-# 2. Dentro de WSL, ejecutar el instalador de Linux
-wsl -- bash -c "curl -fsSL https://raw.githubusercontent.com/Asphyksia/DocuMentor/main/install.sh -o /tmp/dm-install.sh && bash /tmp/dm-install.sh"
+& "$env:USERPROFILE\DocuMentor\uninstall.ps1"
 ```
+
+El desinstalador pregunta qué quieres eliminar: solo DocuMentor, la config de OpenClaw, o OpenClaw completo.
 
 ## Después de instalar
 
