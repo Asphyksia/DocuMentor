@@ -1,0 +1,30 @@
+# Environment
+.env
+backend/.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+
+# Logs
+*.log
+backend/mcp.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (data stays local)
+postgres_data/
+redis_data/

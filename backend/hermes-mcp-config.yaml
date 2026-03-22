@@ -1,0 +1,8 @@
+# Hermes config snippet for UniDash MCP
+# Merge this into ~/.hermes/config.yaml
+
+mcp_servers:
+  unidash:
+    url: "http://localhost:8000/mcp"
+    timeout: 120
+    connect_timeout: 30

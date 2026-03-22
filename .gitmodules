@@ -1,0 +1,6 @@
+[submodule "SurfSense"]
+	path = SurfSense
+	url = https://github.com/MODSetter/SurfSense
+[submodule "hermes-agent"]
+	path = hermes-agent
+	url = https://github.com/NousResearch/hermes-agent
