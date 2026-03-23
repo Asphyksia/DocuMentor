@@ -19,17 +19,18 @@ DocuMentor is a self-hosted AI agent that turns institutional documents into str
                     │  ┌──────────┬───────────────────────────┐│
                     │  │          │  💬 Chat  📊 Dashboard ⚙️ ││
                     │  │  📁 Docs │                           ││
-                    │  │          │    KPIs · Charts · Tables  ││
+                    │  │          │  KPIs · Charts · Tables   ││
+                    │  │          │  Pie · Area · Deltas      ││
                     │  └──────────┴───────────────────────────┘│
                     └──────────────────┬───────────────────────┘
                                        │ WebSocket
                                        ▼
                               Bridge Server (:8001)
-                          Real-time status updates
+                       Real-time status · Generic passthrough
                                        │ JSON-RPC
                                        ▼
-                              MCP Wrapper (:8000)
-                          6 tools for document ops
+                         surfsense-skill MCP (:8000)
+                    25 tools — docs · spaces · chat · reports
                                        │ REST API
                                        ▼
                              SurfSense (:8929)
