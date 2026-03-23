@@ -14,22 +14,31 @@ Built on [Hermes Agent](https://github.com/NousResearch/hermes-agent) · [SurfSe
 DocuMentor is a self-hosted AI agent that turns institutional documents into structured, queryable knowledge. It processes PDFs, spreadsheets, and Word documents — extracting tables, metrics, and summaries — then renders them as visual dashboards you can explore through natural language.
 
 ```
-You  ──────────────────────────────────────────────────────────────►  Dashboard
-      chat / Telegram                                                  KPIs · Charts · Tables
-           │
-           ▼
-    DocuMentor Agent          Hermes Agent · SOUL.md personality
-           │                  Persistent memory · Multi-language
-           ▼
-      MCP Wrapper             Bridges agent ↔ knowledge base
-           │
-           ▼
-    SurfSense (RAG)           Hybrid search · 50+ file formats
-    PostgreSQL + pgvector     Docling local parsing · No external APIs
-           │
-           ▼
-    RelayGPU (LLM)            Affordable inference · OpenAI-compatible
-    Claude Sonnet / Qwen      ~€0.01 per document
+                    ┌──────────────────────────────────────────┐
+                    │        localhost:3000 — Unified UI        │
+                    │  ┌──────────┬───────────────────────────┐│
+                    │  │          │  💬 Chat  📊 Dashboard ⚙️ ││
+                    │  │  📁 Docs │                           ││
+                    │  │          │    KPIs · Charts · Tables  ││
+                    │  └──────────┴───────────────────────────┘│
+                    └──────────────────┬───────────────────────┘
+                                       │ WebSocket
+                                       ▼
+                              Bridge Server (:8001)
+                          Real-time status updates
+                                       │ JSON-RPC
+                                       ▼
+                              MCP Wrapper (:8000)
+                          6 tools for document ops
+                                       │ REST API
+                                       ▼
+                             SurfSense (:8929)
+                    Hybrid search · 50+ formats · Docling
+                         PostgreSQL + pgvector
+                                       │
+                                       ▼
+                        RelayGPU (OpenGPU Network)
+                    Affordable LLM inference · ~€0.01/doc
 ```
 
 ---
@@ -40,6 +49,9 @@ You  ─────────────────────────
 - **🔍 Hybrid search** — semantic + full-text with Reciprocal Rank Fusion
 - **📊 Auto-generated dashboards** — KPI cards, bar charts, line charts, data tables
 - **💬 Natural language queries** — ask questions, get cited answers
+- **🖥️ Unified single-page UI** — sidebar, chat, dashboard, and settings in one window
+- **⚡ Real-time updates** — WebSocket bridge with live status (uploading → indexing → ready)
+- **🎨 Modern dark UI** — Framer Motion animations, drag & drop upload, responsive
 - **🌍 Multi-language** — detects user language automatically, responds in kind
 - **🤖 Conversational setup** — the agent guides you through installation interactively
 - **🔒 Fully private** — no data sent to third parties, all processing local
@@ -169,19 +181,36 @@ Run `curl https://relay.opengpu.network/v2/models` and `curl https://relay.openg
 
 ```
 DocuMentor/
-├── SOUL.md                      # Agent personality, workflow, onboarding flow
-├── BOOTSTRAP.md                 # First-boot setup instructions (read by agent)
-├── DOCSTEMPLATES.md             # JSON output schemas by file type
+├── SOUL.md                        # Agent personality, workflow, onboarding
+├── BOOTSTRAP.md                   # First-boot setup (read by agent)
+├── DOCSTEMPLATES.md               # JSON output schemas by file type
+├── setup.sh                       # Interactive installer for non-technical users
+├── docker-compose.yml             # Orchestrates SurfSense + MCP + Bridge
+├── .env.example                   # Single config file (3 required fields)
 ├── README.md
 ├── LICENSE
 ├── backend/
-│   ├── mcp_wrapper.py           # MCP server — exposes SurfSense as agent tools
-│   ├── requirements.txt
-│   └── .env.example
+│   ├── mcp_wrapper.py             # MCP server — 6 tools for SurfSense
+│   ├── bridge.py                  # WebSocket bridge — connects UI to MCP
+│   ├── Dockerfile
+│   └── requirements.txt
 ├── frontend/
-│   └── DashboardRenderer.tsx    # Next.js component: JSON → charts & tables
-├── hermes-agent/                # Hermes Agent (reference)
-└── SurfSense/                   # SurfSense RAG backend (reference)
+│   ├── app/
+│   │   ├── layout.tsx             # Root layout (dark theme)
+│   │   ├── globals.css            # Tailwind + custom styles
+│   │   └── page.tsx               # Main app — sidebar + tabs + chat
+│   ├── components/
+│   │   ├── AppHeader.tsx          # Logo, animated tabs, connection status
+│   │   ├── ChatPanel.tsx          # Chat with inline dashboards
+│   │   ├── DocSidebar.tsx         # Document list sidebar
+│   │   ├── SettingsPanel.tsx      # Knowledge base management
+│   │   └── UploadModal.tsx        # Drag & drop upload with progress
+│   ├── hooks/
+│   │   └── useBridge.ts           # WebSocket client hook
+│   ├── DashboardRenderer.tsx      # JSON → KPI/bar/line/table/text
+│   └── package.json               # Next.js 14 + Tremor + Framer Motion
+├── hermes-agent/                  # Hermes Agent (git submodule)
+└── SurfSense/                     # SurfSense RAG (git submodule)
 ```
 
 ---
@@ -219,7 +248,8 @@ For production deployment, a VPS with **4–8 GB RAM** is sufficient.
 | LLM inference | [RelayGPU](https://relay.opengpu.network) |
 | Database | PostgreSQL 17 + pgvector |
 | Task queue | Redis + Celery |
-| Dashboard | Next.js + [Tremor](https://tremor.so) + Recharts |
+| Dashboard | Next.js + [Tremor](https://tremor.so) + Recharts + [Framer Motion](https://www.framer.com/motion/) |
+| Real-time layer | WebSocket bridge server (FastAPI) |
 | Agent tools | MCP (Model Context Protocol) |
 
 ---
