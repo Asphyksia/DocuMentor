@@ -194,6 +194,10 @@ NEXT_PUBLIC_MCP_URL=http://localhost:8000
 NEXT_PUBLIC_DEFAULT_SPACE_ID=1
 EOF
 
+# SurfSense needs its own .env in its docker directory
+# Create a symlink so both point to the same config
+ln -sf "$SCRIPT_DIR/.env" "$SCRIPT_DIR/SurfSense/docker/.env"
+
 echo -e "  ${GREEN}✓${NC} .env created"
 echo ""
 
