@@ -27,7 +27,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: python mcp_wrapper.py
+    command: python mcp_server.py
+    volumes:
+      - ./surfsense-skill/mcp_server.py:/app/mcp_server.py:ro
     ports:
       - "${MCP_PORT:-8000}:8000"
     env_file: .env

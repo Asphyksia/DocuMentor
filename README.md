@@ -272,7 +272,8 @@ DocuMentor/
 │   ├── DashboardRenderer.tsx      # JSON → KPI/bar/line/table/text
 │   └── package.json               # Next.js 14 + Tremor + Framer Motion
 ├── hermes-agent/                  # Hermes Agent (git submodule)
-└── SurfSense/                     # SurfSense RAG (git submodule)
+├── SurfSense/                     # SurfSense RAG (git submodule)
+└── surfsense-skill/               # MCP skill — 25 tools for SurfSense (git submodule)
 ```
 
 ---
@@ -300,7 +301,7 @@ DocuMentor/
 | Task queue | Redis + Celery |
 | Dashboard | Next.js + [Tremor](https://tremor.so) + Recharts + [Framer Motion](https://www.framer.com/motion/) |
 | Real-time layer | WebSocket bridge server (FastAPI) |
-| Agent tools | MCP (Model Context Protocol) |
+| Agent tools | [surfsense-skill](https://github.com/Asphyksia/surfsense-skill) (25 MCP tools) |
 
 ---
 

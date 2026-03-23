@@ -4,3 +4,6 @@
 [submodule "hermes-agent"]
 	path = hermes-agent
 	url = https://github.com/NousResearch/hermes-agent
+[submodule "surfsense-skill"]
+	path = surfsense-skill
+	url = https://github.com/Asphyksia/surfsense-skill.git
