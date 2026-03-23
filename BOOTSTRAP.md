@@ -14,40 +14,71 @@ Celebrate small wins ("SurfSense is running ✓").
 
 ---
 
-## Step 0 — Workspace Configuration (silent, runs first)
-Before anything else, detect where DocuMentor is installed and configure Hermes to use it as workspace:
+## Step 0 — Workspace & LLM Configuration (silent, runs first)
+Before anything else, detect where DocuMentor is installed, read the `.env` file,
+and write everything into `~/.hermes/config.yaml` automatically — no hardcoding, no manual config:
 
 ```python
 execute_code("""
-import os, subprocess, pathlib, yaml
+import os, pathlib, yaml
+from dotenv import dotenv_values
 
-# Find the DocuMentor repo root (the folder containing this BOOTSTRAP.md)
+# Find the DocuMentor repo root
 bootstrap_path = pathlib.Path(__file__).resolve() if '__file__' in dir() else pathlib.Path.cwd()
 repo_root = bootstrap_path.parent if bootstrap_path.is_file() else bootstrap_path
 
-# Locate Hermes config
+# Load .env from repo root (fall back to .env.example if .env not yet created)
+env_path = repo_root / '.env'
+example_path = repo_root / '.env.example'
+env = dotenv_values(env_path if env_path.exists() else example_path)
+
+api_key   = env.get('OPENAI_API_KEY', '')
+base_url  = env.get('OPENAI_BASE_URL', 'https://relay.opengpu.network/v2/openai/v1')
+model     = env.get('LLM_MODEL_NAME', 'openai/gpt-5.4')
+
+# Locate / create Hermes config
 hermes_config_path = pathlib.Path.home() / '.hermes' / 'config.yaml'
 hermes_config_path.parent.mkdir(parents=True, exist_ok=True)
 
-# Load existing config or start fresh
+config = {}
 if hermes_config_path.exists():
     with open(hermes_config_path) as f:
         config = yaml.safe_load(f) or {}
-else:
-    config = {}
 
-# Set workspace to DocuMentor repo root
+# Set workspace
 config['workspace'] = str(repo_root)
+
+# Set LLM provider from .env (no hardcoded values)
+config['llm'] = {
+    'provider': 'openai',
+    'model': model,
+    'api_key': api_key,
+    'base_url': base_url,
+}
+
+# Set MCP server
+config.setdefault('mcp_servers', {})['documenter'] = {
+    'url': f"http://localhost:{env.get('MCP_PORT', '8000')}/mcp",
+    'timeout': 120,
+    'connect_timeout': 30,
+}
 
 with open(hermes_config_path, 'w') as f:
     yaml.dump(config, f, default_flow_style=False)
 
-print(f'Workspace set to: {repo_root}')
-print(f'Hermes config updated: {hermes_config_path}')
+print(f'Workspace  : {repo_root}')
+print(f'Model      : {model}')
+print(f'Base URL   : {base_url}')
+print(f'API key    : {api_key[:12]}... (set)' if api_key else 'API key    : NOT SET — add OPENAI_API_KEY to .env')
+print(f'Config     : {hermes_config_path}')
 """)
 ```
 
-Once done, Hermes will always read `SOUL.md`, `BOOTSTRAP.md`, and `DOCSTEMPLATES.md` from the cloned repo — so a `git pull` is all that's needed to update the agent's behavior.
+Once done:
+- Hermes reads `SOUL.md`, `BOOTSTRAP.md`, and `DOCSTEMPLATES.md` from the cloned repo
+- LLM model, API key and base URL come from `.env` — change model by editing `.env` and restarting
+- MCP server pointing to the local wrapper is registered automatically
+- A `git pull` is all that's needed to update the agent's behavior
 
 ---
 
