@@ -81,12 +81,12 @@ DocuMentor is a self-hosted AI agent that turns institutional documents into str
 <summary><strong>🐧 Linux / 🍎 macOS</strong></summary>
 
 ```bash
-git clone https://github.com/Asphyksia/DocuMentor
+git clone --recursive https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
-git submodule update --init --recursive
-chmod +x setup.sh
 ./setup.sh
 ```
+
+> `setup.sh` auto-downloads submodules if you forget `--recursive`.
 
 </details>
 
@@ -95,10 +95,8 @@ chmod +x setup.sh
 
 ```bash
 # Inside WSL2 terminal (Ubuntu recommended)
-git clone https://github.com/Asphyksia/DocuMentor
+git clone --recursive https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
-git submodule update --init --recursive
-chmod +x setup.sh
 ./setup.sh
 ```
 
@@ -110,9 +108,8 @@ chmod +x setup.sh
 <summary><strong>🪟 Windows (PowerShell / Git Bash — no WSL)</strong></summary>
 
 ```powershell
-git clone https://github.com/Asphyksia/DocuMentor
+git clone --recursive https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
-git submodule update --init --recursive
 
 # Copy and edit the environment file
 copy .env.example .env

@@ -41,6 +41,21 @@ echo -e "${CYAN}Checking requirements...${NC}"
 
 ERRORS=0
 
+# Git submodules (must be first — everything depends on these)
+if [ ! -f "$SCRIPT_DIR/SurfSense/docker/docker-compose.yml" ] || [ ! -d "$SCRIPT_DIR/hermes-agent" ] || [ -z "$(ls -A "$SCRIPT_DIR/SurfSense" 2>/dev/null)" ]; then
+    echo -e "  ${YELLOW}↻${NC} Downloading submodules (SurfSense + Hermes Agent)..."
+    git submodule update --init --recursive --force
+    if [ ! -f "$SCRIPT_DIR/SurfSense/docker/docker-compose.yml" ]; then
+        echo -e "  ${RED}✗${NC} Failed to download SurfSense submodule"
+        echo "    Try manually: git submodule update --init --recursive"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo -e "  ${GREEN}✓${NC} Submodules downloaded"
+    fi
+else
+    echo -e "  ${GREEN}✓${NC} Submodules present"
+fi
+
 # Docker
 if ! command -v docker &> /dev/null; then
     echo -e "  ${RED}✗${NC} Docker not found"
