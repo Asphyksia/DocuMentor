@@ -226,18 +226,6 @@ DocuMentor/
 
 ---
 
-## Self-hosting infrastructure
-
-For production deployment, a VPS with **4–8 GB RAM** is sufficient.
-
-| Component | Cost |
-|-----------|------|
-| VPS (4–8 GB RAM) | ~€15/month |
-| RelayGPU LLM | ~€0.01/document |
-| Everything else | Free (open source) |
-
----
-
 ## Tech stack
 
 | Layer | Technology |
@@ -270,6 +258,22 @@ cd SurfSense/docker && docker compose pull && docker compose up -d
 ```
 
 Your documents and configuration are preserved on update.
+
+---
+
+## Uninstalling
+
+```bash
+cd DocuMentor
+./uninstall.sh
+```
+
+The uninstaller lets you choose what to remove:
+1. **Everything** — Docker containers, volumes, Hermes config, project files
+2. **Docker only** — containers and volumes, keep project files
+3. **Cancel**
+
+It will ask for confirmation before deleting your `.env` (contains API key) and project files.
 
 ---
 
