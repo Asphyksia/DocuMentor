@@ -1,0 +1,52 @@
+# ==============================================================================
+# DocuMentor — Docker Compose
+# ==============================================================================
+# Starts SurfSense (RAG backend) + DocuMentor MCP Wrapper
+#
+# Usage:
+#   1. cp .env.example .env && nano .env   (fill in REQUIRED fields)
+#   2. docker compose up -d
+#   3. cd frontend && npm install && npm run dev
+#   4. Open http://localhost:3000
+# ==============================================================================
+
+name: documenter
+
+include:
+  # SurfSense services (db, redis, searxng, backend, celery, electric, frontend)
+  - path: ./SurfSense/docker/docker-compose.yml
+    env_file: .env
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # DocuMentor MCP Wrapper
+  # Exposes SurfSense as tools for the Hermes agent
+  # ----------------------------------------------------------------------------
+  mcp-wrapper:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    env_file: .env
+    environment:
+      SURFSENSE_BASE_URL: ${SURFSENSE_BASE_URL:-http://surfsense-backend-1:8000}
+      SURFSENSE_EMAIL: ${SURFSENSE_EMAIL:-admin@documenter.local}
+      SURFSENSE_PASSWORD: ${SURFSENSE_PASSWORD:-changeme}
+      MCP_PORT: "8000"
+    depends_on:
+      - surfsense-backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - documenter-net
+
+networks:
+  documenter-net:
+    driver: bridge
