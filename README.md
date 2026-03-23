@@ -130,7 +130,7 @@ DocuMentor uses [RelayGPU](https://relay.opengpu.network) — premium models at 
 | `qwen/qwen-32b-instruct` | Daily use, multilingual, fast | ~$0.55/1M tokens |
 | `deepseek/deepseek-v3` | Budget option, good reasoning | ~$0.55/1M tokens |
 
-**Base URL:** `https://relay.opengpu.network/v2/anthropic/v1`
+**Base URL:** `https://relay.opengpu.network/v2/openai/v1`
 
 **Estimated monthly cost:** €5–15 for moderate use (hundreds of documents/month).
 **Per document:** ~€0.01 average.
