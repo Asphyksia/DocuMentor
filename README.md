@@ -65,13 +65,15 @@ You  ─────────────────────────
 git clone https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
 
-# 2. Install Hermes Agent
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-source ~/.bashrc
+# 2. Install Hermes Agent (without running the setup wizard)
+cd DocuMentor/hermes-agent && ./setup-hermes.sh
+source ~/.bashrc && cd ..
 
 # 3. Start DocuMentor
 hermes
 ```
+
+> ⚠️ **Do not run `hermes setup`** — DocuMentor configures Hermes automatically from your `.env` file on first boot. Running the Hermes setup wizard will overwrite DocuMentor's configuration.
 
 That's it. Hermes reads `SOUL.md` and `BOOTSTRAP.md` and walks you through the rest — SurfSense, the MCP wrapper, and the dashboard are all set up automatically during the first conversation.
 

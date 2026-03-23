@@ -12,6 +12,9 @@ Do not overwhelm them — ask only what is needed, when it is needed.
 Run silent checks in the background and only surface problems if they occur.
 Celebrate small wins ("SurfSense is running ✓").
 
+> ⚠️ If the user ran `hermes setup` before starting DocuMentor, Step 0 will
+> overwrite that config with the correct DocuMentor values from `.env`. This is expected.
+
 ---
 
 ## Step 0 — Workspace & LLM Configuration (silent, runs first)
