@@ -123,17 +123,33 @@ That's it. Hermes reads `SOUL.md` and `BOOTSTRAP.md` and walks you through the r
 ## Models & cost
 
 DocuMentor uses [RelayGPU](https://relay.opengpu.network) — premium models at reduced cost.
+Run `curl https://relay.opengpu.network/v2/models` and `curl https://relay.opengpu.network/v2/pricing` for the live list.
 
-| Model | Best for | Approx. cost |
-|-------|----------|-------------|
-| `anthropic/claude-sonnet-4-6` | Deep analysis, complex documents | ~$3/1M tokens |
-| `qwen/qwen-32b-instruct` | Daily use, multilingual, fast | ~$0.55/1M tokens |
-| `deepseek/deepseek-v3` | Budget option, good reasoning | ~$0.55/1M tokens |
+### OpenAI-compatible endpoint
+`https://relay.opengpu.network/v2/openai/v1`
 
-**Base URL:** `https://relay.opengpu.network/v2/openai/v1`
+| Model | Input | Output | Best for |
+|-------|-------|--------|----------|
+| `openai/gpt-5.4` ⭐ default | $2.50/1M | $15.00/1M | Best quality, complex analysis |
+| `openai/gpt-5.2` | $1.75/1M | $14.00/1M | General purpose |
+| `moonshotai/kimi-k2.5` | $0.55/1M | $2.95/1M | Multilingual, daily use |
+| `deepseek-ai/DeepSeek-V3.1` | $0.55/1M | $1.66/1M | Budget, good reasoning |
+| `infercom/MiniMax-M2.5` | $0.30/1M | $1.20/1M | 164K context window |
+| `Qwen/Qwen3.5-397B-A17B-FP8` | $0.20/1M | $1.20/1M | Cheapest large model |
+| `Qwen/Qwen3-Coder` | $1.30/1M | $5.00/1M | Code generation |
+
+### Anthropic-compatible endpoint
+`https://relay.opengpu.network/v2/anthropic/v1`
+
+| Model | Input | Output | Best for |
+|-------|-------|--------|----------|
+| `anthropic/claude-sonnet-4-6` | $3.00/1M | $15.00/1M | Deep analysis, long documents |
+| `anthropic/claude-opus-4-6` | $5.00/1M | $25.00/1M | Maximum quality |
+
+> ⚠️ Anthropic models require changing `OPENAI_BASE_URL` to the Anthropic endpoint in `.env`.
 
 **Estimated monthly cost:** €5–15 for moderate use (hundreds of documents/month).
-**Per document:** ~€0.01 average.
+**Per document:** ~€0.01 average with `gpt-5.4` default.
 
 ---
 
