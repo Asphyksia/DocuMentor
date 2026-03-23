@@ -28,3 +28,4 @@ Thumbs.db
 # Docker volumes (data stays local)
 postgres_data/
 redis_data/
+memory/
