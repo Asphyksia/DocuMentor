@@ -64,31 +64,85 @@ DocuMentor is a self-hosted AI agent that turns institutional documents into str
 
 ### Requirements
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) running
-- Python 3.11+
-- Node.js 18+ (for the dashboard)
-- ~5 GB free disk space
-- A [RelayGPU API key](https://relay.opengpu.network) — `relay_sk_...`
+| Requirement | Windows | macOS | Linux |
+|-------------|---------|-------|-------|
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | ✅ | ✅ | ✅ (or Docker Engine) |
+| [Git](https://git-scm.com/downloads) | ✅ | ✅ (preinstalled or via Xcode) | ✅ (preinstalled) |
+| [Node.js 18+](https://nodejs.org/) | ✅ | ✅ | ✅ |
+| [Python 3.11+](https://www.python.org/downloads/) | ✅ | ✅ | ✅ |
+| Disk space | ~5 GB | ~5 GB | ~5 GB |
+| [RelayGPU API key](https://relay.opengpu.network) | `relay_sk_...` | `relay_sk_...` | `relay_sk_...` |
+
+> 💡 **Windows users:** Use [Git Bash](https://gitforwindows.org/), [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install), or PowerShell. WSL2 is recommended for best Docker performance.
 
 ### Install
+
+<details>
+<summary><strong>🐧 Linux / 🍎 macOS</strong></summary>
 
 ```bash
 git clone https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
 git submodule update --init --recursive
+chmod +x setup.sh
 ./setup.sh
 ```
 
-The setup script will:
-1. Check requirements (Docker, Node.js, Python, disk space)
-2. Ask for your RelayGPU API key and a vault password
-3. Let you pick your default AI model
-4. Generate the `.env` automatically
-5. Install Hermes Agent
-6. Start all services via Docker
-7. Install dashboard dependencies
+</details>
 
-Then start DocuMentor:
+<details>
+<summary><strong>🪟 Windows (WSL2 — recommended)</strong></summary>
+
+```bash
+# Inside WSL2 terminal (Ubuntu recommended)
+git clone https://github.com/Asphyksia/DocuMentor
+cd DocuMentor
+git submodule update --init --recursive
+chmod +x setup.sh
+./setup.sh
+```
+
+> Make sure Docker Desktop has **WSL2 backend** enabled (Settings → General → "Use the WSL 2 based engine").
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows (PowerShell / Git Bash — no WSL)</strong></summary>
+
+```powershell
+git clone https://github.com/Asphyksia/DocuMentor
+cd DocuMentor
+git submodule update --init --recursive
+
+# Copy and edit the environment file
+copy .env.example .env
+# Edit .env with your API key and password (use notepad, VS Code, etc.)
+
+# Start backend services
+docker compose up -d
+
+# Install and start the dashboard
+cd frontend
+npm install
+npm run dev
+```
+
+> Without WSL, `setup.sh` won't run natively. The manual steps above do the same thing — just edit `.env` before starting.
+
+</details>
+
+### What setup.sh does
+
+1. Checks requirements (Docker, Node.js, Python, disk space)
+2. Asks for your RelayGPU API key and a vault password
+3. Lets you pick your default AI model
+4. Generates the `.env` automatically
+5. Installs Hermes Agent
+6. Starts all services via Docker
+7. Installs dashboard dependencies
+
+### Start DocuMentor
+
 ```bash
 # Terminal 1 — Dashboard
 cd frontend && npm run dev
@@ -97,7 +151,18 @@ cd frontend && npm run dev
 hermes
 ```
 
+Open **http://localhost:3000** — that's it.
+
 > ⚠️ **Do not run `hermes setup`** — DocuMentor configures Hermes automatically from your `.env`. Running the Hermes wizard will overwrite DocuMentor's configuration.
+
+### Platform notes
+
+| Platform | Docker networking | Shell scripts | Notes |
+|----------|-------------------|---------------|-------|
+| **Linux** | Native — best performance | ✅ Native | Recommended for production |
+| **macOS** | Docker Desktop VM — good | ✅ Native | Apple Silicon and Intel supported |
+| **Windows + WSL2** | Near-native via WSL2 backend | ✅ Bash in WSL | Recommended Windows setup |
+| **Windows native** | Docker Desktop — works | ❌ Use manual steps | No `setup.sh`; edit `.env` manually |
 
 ---
 
@@ -263,12 +328,20 @@ Your documents and configuration are preserved on update.
 
 ## Uninstalling
 
+**Linux / macOS / WSL2:**
 ```bash
 cd DocuMentor
 ./uninstall.sh
 ```
 
-The uninstaller lets you choose what to remove:
+**Windows (no WSL):**
+```powershell
+cd DocuMentor
+docker compose down -v --remove-orphans
+# Then delete the DocuMentor folder manually
+```
+
+The uninstaller (Linux/macOS/WSL2) lets you choose what to remove:
 1. **Everything** — Docker containers, volumes, Hermes config, project files
 2. **Docker only** — containers and volumes, keep project files
 3. **Cancel**

@@ -6,20 +6,25 @@ Single point of communication — the dashboard never talks to MCP or SurfSense 
 
 Protocol:
   Client → Server:
-    { "type": "query",    "payload": { "query": "...", "search_space_id": 1 } }
-    { "type": "upload",   "payload": { "filename": "...", "data": "<base64>", "search_space_id": 1 } }
-    { "type": "list_docs","payload": { "search_space_id": 1 } }
+    { "type": "query",            "payload": { "query": "...", "search_space_id": 1 } }
+    { "type": "upload",           "payload": { "filename": "...", "data": "<base64>", "search_space_id": 1 } }
+    { "type": "list_docs",        "payload": { "search_space_id": 1 } }
     { "type": "list_spaces" }
-    { "type": "create_space", "payload": { "name": "...", "description": "..." } }
-    { "type": "extract",  "payload": { "doc_id": 1, "search_space_id": 1 } }
+    { "type": "create_space",     "payload": { "name": "...", "description": "..." } }
+    { "type": "extract",          "payload": { "doc_id": 1, "search_space_id": 1 } }
+    { "type": "delete_document",  "payload": { "document_id": 5, "search_space_id": 1 } }
+    { "type": "delete_space",     "payload": { "search_space_id": 2 } }
+    { "type": "search_documents", "payload": { "title": "budget", "search_space_id": 1 } }
+    { "type": "mcp_call",         "payload": { "tool": "<any_mcp_tool>", "args": { ... } } }
     { "type": "status" }
 
   Server → Client:
-    { "type": "result",   "payload": { ... dashboard JSON ... } }
-    { "type": "status",   "payload": { "state": "uploading|indexing|querying|ready|error", "message": "..." } }
-    { "type": "documents","payload": { ... document list ... } }
-    { "type": "spaces",   "payload": { ... spaces list ... } }
-    { "type": "error",    "payload": { "message": "..." } }
+    { "type": "result",     "payload": { ... dashboard JSON ... } }
+    { "type": "status",     "payload": { "state": "uploading|indexing|querying|ready|error", "message": "..." } }
+    { "type": "documents",  "payload": { ... document list ... } }
+    { "type": "spaces",     "payload": { ... spaces list ... } }
+    { "type": "mcp_result", "payload": { "tool": "...", "result": { ... } } }
+    { "type": "error",      "payload": { "message": "..." } }
 
 Usage:
   pip install fastapi uvicorn httpx python-multipart websockets
@@ -200,18 +205,28 @@ async def handle_upload(ws: WebSocket, payload: dict):
             "payload": {"state": "indexing", "message": f"Indexing {filename}..."},
         })
 
-        # Poll for document readiness (max 60s)
+        # Poll for document readiness (max 60s) using batch status endpoint
         doc_id = doc_ids[0] if doc_ids else None
         if doc_id:
             for _ in range(30):
                 await asyncio.sleep(2)
-                docs = await mcp_call("surfsense_list_documents", {
-                    "search_space_id": search_space_id,
-                })
-                doc_list = docs.get("documents", [])
-                target = next((d for d in doc_list if d["id"] == doc_id), None)
-                if target and target.get("status") == "ready":
-                    break
+                try:
+                    status = await mcp_call("surfsense_document_status", {
+                        "search_space_id": search_space_id,
+                        "document_ids": str(doc_id),
+                    })
+                    items = status.get("items", [])
+                    if items and items[0].get("state") == "ready":
+                        break
+                except Exception:
+                    # Fallback to list_documents if status endpoint fails
+                    docs = await mcp_call("surfsense_list_documents", {
+                        "search_space_id": search_space_id,
+                    })
+                    doc_list = docs.get("documents", [])
+                    target = next((d for d in doc_list if d["id"] == doc_id), None)
+                    if target and target.get("status") == "ready":
+                        break
 
             # Status: extracting
             await ws.send_json({
@@ -346,6 +361,79 @@ async def handle_extract(ws: WebSocket, payload: dict):
 
 
 # ---------------------------------------------------------------------------
+# Generic MCP passthrough — exposes ALL 25 tools to the dashboard
+# ---------------------------------------------------------------------------
+
+async def handle_mcp_call(ws: WebSocket, payload: dict):
+    """
+    Generic passthrough: call any MCP tool by name.
+    Client sends: { "type": "mcp_call", "payload": { "tool": "surfsense_delete_document", "args": { "document_id": 5 } } }
+    Server returns: { "type": "mcp_result", "payload": { "tool": "...", "result": { ... } } }
+    """
+    tool = payload.get("tool", "")
+    args = payload.get("args", {})
+    request_id = payload.get("request_id")
+
+    if not tool:
+        await ws.send_json({"type": "error", "payload": {"message": "Missing 'tool' in mcp_call"}})
+        return
+
+    try:
+        result = await mcp_call(tool, args)
+        response: dict[str, Any] = {
+            "type": "mcp_result",
+            "payload": {"tool": tool, "result": result},
+        }
+        if request_id:
+            response["payload"]["request_id"] = request_id
+        await ws.send_json(response)
+    except Exception as e:
+        logger.error("MCP passthrough error (%s): %s", tool, e)
+        response = {"type": "error", "payload": {"message": str(e), "tool": tool}}
+        if request_id:
+            response["payload"]["request_id"] = request_id
+        await ws.send_json(response)
+
+
+async def handle_delete_document(ws: WebSocket, payload: dict):
+    """Delete a document and refresh the list."""
+    try:
+        result = await mcp_call("surfsense_delete_document", {
+            "document_id": payload["document_id"],
+        })
+        await ws.send_json({"type": "mcp_result", "payload": {"tool": "surfsense_delete_document", "result": result}})
+        # Refresh doc list
+        if "search_space_id" in payload:
+            await handle_list_docs(ws, {"search_space_id": payload["search_space_id"]})
+    except Exception as e:
+        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+
+
+async def handle_delete_space(ws: WebSocket, payload: dict):
+    """Delete a search space and refresh the list."""
+    try:
+        result = await mcp_call("surfsense_delete_space", {
+            "search_space_id": payload["search_space_id"],
+        })
+        await ws.send_json({"type": "mcp_result", "payload": {"tool": "surfsense_delete_space", "result": result}})
+        await handle_list_spaces(ws)
+    except Exception as e:
+        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+
+
+async def handle_search_documents(ws: WebSocket, payload: dict):
+    """Search documents by title."""
+    try:
+        result = await mcp_call("surfsense_search_documents", {
+            "title": payload["title"],
+            "search_space_id": payload.get("search_space_id"),
+        })
+        await ws.send_json({"type": "documents", "payload": result})
+    except Exception as e:
+        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -357,6 +445,10 @@ HANDLERS = {
     "upload": lambda ws, p: handle_upload(ws, p),
     "query": lambda ws, p: handle_query(ws, p),
     "extract": lambda ws, p: handle_extract(ws, p),
+    "delete_document": lambda ws, p: handle_delete_document(ws, p),
+    "delete_space": lambda ws, p: handle_delete_space(ws, p),
+    "search_documents": lambda ws, p: handle_search_documents(ws, p),
+    "mcp_call": lambda ws, p: handle_mcp_call(ws, p),
 }
 
 
