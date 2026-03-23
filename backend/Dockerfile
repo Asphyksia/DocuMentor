@@ -6,7 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY mcp_wrapper.py .
+COPY bridge.py .
 
-EXPOSE 8000
-
-CMD ["python", "mcp_wrapper.py"]
+EXPOSE 8000 8001
