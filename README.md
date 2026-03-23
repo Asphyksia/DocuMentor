@@ -61,21 +61,31 @@ You  ─────────────────────────
 ### Install
 
 ```bash
-# 1. Clone the repo
 git clone https://github.com/Asphyksia/DocuMentor
 cd DocuMentor
+git submodule update --init --recursive
+./setup.sh
+```
 
-# 2. Install Hermes Agent (without running the setup wizard)
-cd DocuMentor/hermes-agent && ./setup-hermes.sh
-source ~/.bashrc && cd ..
+The setup script will:
+1. Check requirements (Docker, Node.js, Python, disk space)
+2. Ask for your RelayGPU API key and a vault password
+3. Let you pick your default AI model
+4. Generate the `.env` automatically
+5. Install Hermes Agent
+6. Start all services via Docker
+7. Install dashboard dependencies
 
-# 3. Start DocuMentor
+Then start DocuMentor:
+```bash
+# Terminal 1 — Dashboard
+cd frontend && npm run dev
+
+# Terminal 2 — Agent
 hermes
 ```
 
-> ⚠️ **Do not run `hermes setup`** — DocuMentor configures Hermes automatically from your `.env` file on first boot. Running the Hermes setup wizard will overwrite DocuMentor's configuration.
-
-That's it. Hermes reads `SOUL.md` and `BOOTSTRAP.md` and walks you through the rest — SurfSense, the MCP wrapper, and the dashboard are all set up automatically during the first conversation.
+> ⚠️ **Do not run `hermes setup`** — DocuMentor configures Hermes automatically from your `.env`. Running the Hermes wizard will overwrite DocuMentor's configuration.
 
 ---
 
