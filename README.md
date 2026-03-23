@@ -194,6 +194,25 @@ For production deployment, a VPS with **4–8 GB RAM** is sufficient.
 
 ---
 
+## Updating
+
+```bash
+cd DocuMentor
+
+# Update DocuMentor (agent config, templates, MCP wrapper)
+git pull
+
+# Update SurfSense and Hermes Agent to latest
+git submodule update --remote
+
+# Restart services
+cd SurfSense/docker && docker compose pull && docker compose up -d
+```
+
+Your documents and configuration are preserved on update.
+
+---
+
 ## Contributing
 
 PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

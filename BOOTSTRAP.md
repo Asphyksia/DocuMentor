@@ -14,7 +14,44 @@ Celebrate small wins ("SurfSense is running ✓").
 
 ---
 
-## Step 0 — Pre-flight Checks (silent)
+## Step 0 — Workspace Configuration (silent, runs first)
+Before anything else, detect where DocuMentor is installed and configure Hermes to use it as workspace:
+
+```python
+execute_code("""
+import os, subprocess, pathlib, yaml
+
+# Find the DocuMentor repo root (the folder containing this BOOTSTRAP.md)
+bootstrap_path = pathlib.Path(__file__).resolve() if '__file__' in dir() else pathlib.Path.cwd()
+repo_root = bootstrap_path.parent if bootstrap_path.is_file() else bootstrap_path
+
+# Locate Hermes config
+hermes_config_path = pathlib.Path.home() / '.hermes' / 'config.yaml'
+hermes_config_path.parent.mkdir(parents=True, exist_ok=True)
+
+# Load existing config or start fresh
+if hermes_config_path.exists():
+    with open(hermes_config_path) as f:
+        config = yaml.safe_load(f) or {}
+else:
+    config = {}
+
+# Set workspace to DocuMentor repo root
+config['workspace'] = str(repo_root)
+
+with open(hermes_config_path, 'w') as f:
+    yaml.dump(config, f, default_flow_style=False)
+
+print(f'Workspace set to: {repo_root}')
+print(f'Hermes config updated: {hermes_config_path}')
+""")
+```
+
+Once done, Hermes will always read `SOUL.md`, `BOOTSTRAP.md`, and `DOCSTEMPLATES.md` from the cloned repo — so a `git pull` is all that's needed to update the agent's behavior.
+
+---
+
+## Step 0b — Pre-flight Checks (silent)
 Before talking to the user, verify silently:
 
 ```python
