@@ -32,12 +32,13 @@ services:
       - "${MCP_PORT:-8000}:8000"
     env_file: .env
     environment:
-      SURFSENSE_BASE_URL: ${SURFSENSE_BASE_URL:-http://surfsense-backend-1:8000}
+      SURFSENSE_BASE_URL: ${SURFSENSE_BASE_URL:-http://backend:8000}
       SURFSENSE_EMAIL: ${SURFSENSE_EMAIL:-admin@documenter.local}
       SURFSENSE_PASSWORD: ${SURFSENSE_PASSWORD:-changeme}
       MCP_PORT: "8000"
     depends_on:
-      - surfsense-backend
+      backend:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -45,8 +46,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    networks:
-      - documenter-net
 
   # ----------------------------------------------------------------------------
   # DocuMentor Bridge
@@ -73,9 +72,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-    networks:
-      - documenter-net
-
-networks:
-  documenter-net:
-    driver: bridge
