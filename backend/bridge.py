@@ -166,7 +166,7 @@ async def mcp_call(tool: str, args: dict) -> dict:
     """Call a tool on the MCP wrapper via JSON-RPC. Raises on failure."""
     client = get_mcp_client()
     resp = await client.post(
-        f"{MCP_BASE}/mcp",
+        f"{MCP_BASE}/jsonrpc",
         json={
             "jsonrpc": "2.0",
             "id": int(time.time() * 1000),

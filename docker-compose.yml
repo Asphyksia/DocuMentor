@@ -29,14 +29,13 @@ services:
       dockerfile: Dockerfile
     command: python mcp_server.py
     volumes:
-      - ./surfsense-skill/mcp_server.py:/app/mcp_server.py:ro
       - upload-tmp:/tmp/documenter-uploads
     ports:
       - "${MCP_PORT:-8000}:8000"
     env_file: .env
     environment:
       SURFSENSE_BASE_URL: ${SURFSENSE_BASE_URL:-http://backend:8000}
-      SURFSENSE_EMAIL: ${SURFSENSE_EMAIL:-admin@documenter.local}
+      SURFSENSE_EMAIL: ${SURFSENSE_EMAIL:-admin@documenter.app}
       SURFSENSE_PASSWORD: ${SURFSENSE_PASSWORD:-changeme}
       MCP_PORT: "8000"
     depends_on:
