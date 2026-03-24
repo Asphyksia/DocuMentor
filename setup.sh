@@ -265,15 +265,16 @@ else
         exit 1
     fi
 
-    # --- Pin setuptools to avoid broken wheels (uv 0.11 / setuptools 82 bug) ---
+    # --- Upgrade pip + pin setuptools to avoid broken wheels ---
+    "$HERMES_VENV/bin/pip" install --quiet --upgrade pip
     "$HERMES_VENV/bin/pip" install --quiet "setuptools>=61,<82" wheel
 
     # --- Install Hermes ---
     echo -e "  ${CYAN}↻${NC} Installing dependencies (this may take a minute)..."
     cd "$HERMES_DIR"
 
-    "$HERMES_VENV/bin/pip" install -e "." 2>&1 | tail -1
-    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    if ! "$HERMES_VENV/bin/pip" install -e "." 2>&1; then
+        echo ""
         echo -e "  ${RED}✗${NC} Hermes installation failed"
         echo "    Check the output above for details"
         exit 1
