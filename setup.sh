@@ -287,6 +287,15 @@ echo ""
 
 echo -e "${CYAN}Installing dashboard...${NC}"
 
+# Create frontend .env.local if it doesn't exist
+if [ ! -f "$SCRIPT_DIR/frontend/.env.local" ]; then
+    cat > "$SCRIPT_DIR/frontend/.env.local" << ENVLOCAL
+NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8001/ws
+NEXT_PUBLIC_DEFAULT_SPACE_ID=1
+ENVLOCAL
+    echo -e "  ${GREEN}✓${NC} Frontend .env.local created"
+fi
+
 if [ -d "$SCRIPT_DIR/frontend/node_modules" ]; then
     echo -e "  ${GREEN}✓${NC} Dependencies already installed"
 else
