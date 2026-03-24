@@ -226,16 +226,31 @@ if command -v hermes &> /dev/null; then
     echo -e "  ${GREEN}✓${NC} Hermes already installed"
 else
     if [ -f "$SCRIPT_DIR/hermes-agent/setup-hermes.sh" ]; then
-        # Run setup but skip the interactive wizard at the end
-        # by passing a non-Y answer automatically
-        echo "n" | bash "$SCRIPT_DIR/hermes-agent/setup-hermes.sh"
+        # Hermes setup requires 'uv' (Python package manager).
+        # Install it first if missing, then run setup-hermes.sh.
+        if ! command -v uv &> /dev/null && [ ! -x "$HOME/.local/bin/uv" ] && [ ! -x "$HOME/.cargo/bin/uv" ]; then
+            echo -e "  ${CYAN}↻${NC} Installing uv (Python package manager)..."
+            curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null || true
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+        fi
+
+        # Run setup, skip the interactive wizard (answer 'n' to final prompt)
+        echo "n" | bash "$SCRIPT_DIR/hermes-agent/setup-hermes.sh" || {
+            echo -e "  ${YELLOW}⚠${NC}  Hermes installation had issues — you can install it later"
+            echo "    Run: cd hermes-agent && ./setup-hermes.sh"
+            echo "    DocuMentor works without Hermes (dashboard-only mode)"
+        }
 
         # Reload PATH
         export PATH="$HOME/.local/bin:$PATH"
-        echo -e "  ${GREEN}✓${NC} Hermes installed"
+
+        if command -v hermes &> /dev/null; then
+            echo -e "  ${GREEN}✓${NC} Hermes installed"
+        else
+            echo -e "  ${YELLOW}⚠${NC}  Hermes not in PATH — dashboard will work, agent features need manual install"
+        fi
     else
-        echo -e "  ${RED}✗${NC} hermes-agent not found — run: git submodule update --init"
-        exit 1
+        echo -e "  ${YELLOW}⚠${NC}  hermes-agent submodule not found — skipping (dashboard works without it)"
     fi
 fi
 
