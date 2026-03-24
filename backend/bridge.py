@@ -301,7 +301,11 @@ async def handle_upload(ws: WebSocket, payload: dict) -> None:
         del data.data
 
         suffix = Path(data.filename).suffix
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="documenter-")
+        upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/documenter-uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix, prefix="documenter-", dir=upload_dir
+        )
         tmp.write(raw_bytes)
         tmp.close()
         del raw_bytes  # free
