@@ -308,6 +308,24 @@ else
     ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes"
     export PATH="$HOME/.local/bin:$PATH"
     echo -e "  ${GREEN}✓${NC} hermes command available"
+
+    # --- Configure Hermes MCP connection ---
+    HERMES_CONFIG_DIR="${HERMES_HOME:-$HOME/.hermes}"
+    HERMES_CONFIG="$HERMES_CONFIG_DIR/config.yaml"
+    mkdir -p "$HERMES_CONFIG_DIR"
+
+    if [ ! -f "$HERMES_CONFIG" ]; then
+        cat > "$HERMES_CONFIG" << 'HERMESCONF'
+mcp_servers:
+  surfsense:
+    url: "http://localhost:8000/mcp"
+    timeout: 120
+    connect_timeout: 30
+HERMESCONF
+        echo -e "  ${GREEN}✓${NC} Hermes MCP config created"
+    else
+        echo -e "  ${GREEN}✓${NC} Hermes config exists"
+    fi
 fi
 
 echo ""
