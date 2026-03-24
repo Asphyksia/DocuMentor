@@ -222,41 +222,83 @@ echo ""
 
 echo -e "${CYAN}Installing Hermes Agent...${NC}"
 
-if command -v hermes &> /dev/null; then
+HERMES_DIR="$SCRIPT_DIR/hermes-agent"
+HERMES_VENV="$HERMES_DIR/venv"
+HERMES_BIN="$HERMES_VENV/bin/hermes"
+
+if [ -x "$HERMES_BIN" ]; then
     echo -e "  ${GREEN}✓${NC} Hermes already installed"
+elif [ ! -d "$HERMES_DIR" ] || [ ! -f "$HERMES_DIR/pyproject.toml" ]; then
+    echo -e "  ${RED}✗${NC} hermes-agent submodule not found"
+    echo "    Run: git submodule update --init --recursive"
+    exit 1
 else
-    if [ -f "$SCRIPT_DIR/hermes-agent/setup-hermes.sh" ]; then
-        # Hermes setup requires 'uv' (Python package manager).
-        # Install it first if missing, then run setup-hermes.sh.
-        if ! command -v uv &> /dev/null && [ ! -x "$HOME/.local/bin/uv" ] && [ ! -x "$HOME/.cargo/bin/uv" ]; then
-            echo -e "  ${CYAN}↻${NC} Installing uv (Python package manager)..."
-            curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null || true
-            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    # --- Find a working Python 3.11+ ---
+    PYTHON_CMD=""
+    for candidate in python3.11 python3.12 python3.13 python3; do
+        if command -v "$candidate" &> /dev/null; then
+            PY_VER=$($candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+            PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
+            PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
+            if [ "$PY_MAJOR" = "3" ] && [ "$PY_MINOR" -ge 11 ]; then
+                PYTHON_CMD="$candidate"
+                echo -e "  ${GREEN}✓${NC} Python $PY_VER found ($candidate)"
+                break
+            fi
         fi
+    done
 
-        # Run setup, skip the interactive wizard (answer 'n' to final prompt)
-        echo "n" | bash "$SCRIPT_DIR/hermes-agent/setup-hermes.sh"
-        if [ $? -ne 0 ]; then
-            echo -e "  ${RED}✗${NC} Hermes installation failed"
-            echo "    Try manually: cd hermes-agent && ./setup-hermes.sh"
-            exit 1
-        fi
-
-        # Reload PATH
-        export PATH="$HOME/.local/bin:$PATH"
-
-        if command -v hermes &> /dev/null; then
-            echo -e "  ${GREEN}✓${NC} Hermes installed"
-        else
-            echo -e "  ${RED}✗${NC} Hermes installed but 'hermes' command not found in PATH"
-            echo "    Add ~/.local/bin to your PATH and try again"
-            exit 1
-        fi
-    else
-        echo -e "  ${RED}✗${NC} hermes-agent submodule not found"
-        echo "    Run: git submodule update --init --recursive"
+    if [ -z "$PYTHON_CMD" ]; then
+        echo -e "  ${RED}✗${NC} Python 3.11+ not found"
+        echo "    Install Python 3.11 or later: https://python.org"
         exit 1
     fi
+
+    # --- Create venv ---
+    echo -e "  ${CYAN}↻${NC} Creating virtual environment..."
+    rm -rf "$HERMES_VENV"
+    $PYTHON_CMD -m venv "$HERMES_VENV"
+
+    if [ ! -f "$HERMES_VENV/bin/pip" ]; then
+        echo -e "  ${RED}✗${NC} Failed to create virtual environment (pip not found)"
+        echo "    Install python3-venv: sudo apt install python3-venv"
+        exit 1
+    fi
+
+    # --- Pin setuptools to avoid broken wheels (uv 0.11 / setuptools 82 bug) ---
+    "$HERMES_VENV/bin/pip" install --quiet "setuptools>=61,<82" wheel
+
+    # --- Install Hermes ---
+    echo -e "  ${CYAN}↻${NC} Installing dependencies (this may take a minute)..."
+    cd "$HERMES_DIR"
+
+    "$HERMES_VENV/bin/pip" install -e "." 2>&1 | tail -1
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        echo -e "  ${RED}✗${NC} Hermes installation failed"
+        echo "    Check the output above for details"
+        exit 1
+    fi
+
+    # --- Install optional submodules (non-blocking) ---
+    if [ -f "mini-swe-agent/pyproject.toml" ]; then
+        "$HERMES_VENV/bin/pip" install --quiet -e "./mini-swe-agent" 2>/dev/null || true
+    fi
+
+    cd "$SCRIPT_DIR"
+
+    # --- Verify ---
+    if [ ! -x "$HERMES_BIN" ]; then
+        echo -e "  ${RED}✗${NC} Hermes binary not found after install"
+        exit 1
+    fi
+
+    echo -e "  ${GREEN}✓${NC} Hermes installed"
+
+    # --- Symlink to PATH ---
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes"
+    export PATH="$HOME/.local/bin:$PATH"
+    echo -e "  ${GREEN}✓${NC} hermes command available"
 fi
 
 echo ""
