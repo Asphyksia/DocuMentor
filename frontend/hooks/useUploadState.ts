@@ -26,7 +26,11 @@ export function useUploadState() {
   const [status, setStatus] = useState<UploadUiStatus>("idle");
   const [message, setMessage] = useState("");
 
-  const openModal = useCallback(() => setShowModal(true), []);
+  const openModal = useCallback(() => {
+    setStatus("idle");
+    setMessage("");
+    setShowModal(true);
+  }, []);
 
   const closeModal = useCallback(() => {
     setShowModal(false);
