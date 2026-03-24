@@ -200,7 +200,7 @@ AUTH_TYPE=LOCAL
 
 # MCP Wrapper (inside Docker, backend is reachable as http://backend:8000)
 SURFSENSE_BASE_URL=http://backend:8000
-SURFSENSE_EMAIL=admin@documenter.local
+SURFSENSE_EMAIL=admin@documenter.app
 SURFSENSE_PASSWORD=${VAULT_PASSWORD}
 MCP_PORT=8000
 
@@ -341,6 +341,21 @@ done
 if [ $WAITED -ge $MAX_WAIT ]; then
     echo -e "  ${YELLOW}⚠${NC}  SurfSense is taking longer than expected"
     echo "    Check logs with: docker compose logs backend"
+fi
+
+# Register the admin user in SurfSense (idempotent — ignores if exists)
+REGISTER_BODY="{\"email\":\"${SURFSENSE_EMAIL:-admin@documenter.app}\",\"password\":\"${VAULT_PASSWORD}\"}"
+REGISTER_RESP=$(curl -sf -X POST http://localhost:8929/auth/register \
+    -H "Content-Type: application/json" \
+    -d "$REGISTER_BODY" 2>/dev/null || true)
+
+if echo "$REGISTER_RESP" | grep -q '"id"'; then
+    echo -e "  ${GREEN}✓${NC} Admin user registered"
+elif echo "$REGISTER_RESP" | grep -q 'REGISTER_USER_ALREADY_EXISTS'; then
+    echo -e "  ${GREEN}✓${NC} Admin user already exists"
+else
+    echo -e "  ${YELLOW}⚠${NC}  Could not register admin user — you may need to register manually"
+    echo "    Visit http://localhost:3929 to create an account"
 fi
 
 # Check MCP wrapper
