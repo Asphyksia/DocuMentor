@@ -269,6 +269,18 @@ else
     "$HERMES_VENV/bin/pip" install --quiet --upgrade pip
     "$HERMES_VENV/bin/pip" install --quiet "setuptools>=61,<82" wheel
 
+    # --- Workaround: litellm quarantined on PyPI (March 2026) ---
+    # See: https://github.com/NousResearch/hermes-agent/issues/2790
+    if ! "$HERMES_VENV/bin/pip" install --quiet "litellm>=1.75.5" 2>/dev/null; then
+        echo -e "  ${CYAN}↻${NC} litellm not available on PyPI, installing from GitHub..."
+        "$HERMES_VENV/bin/pip" install --quiet "litellm @ git+https://github.com/BerriAI/litellm.git" || {
+            echo -e "  ${RED}✗${NC} Failed to install litellm from GitHub"
+            echo "    litellm is currently quarantined on PyPI"
+            echo "    See: https://github.com/NousResearch/hermes-agent/issues/2790"
+            exit 1
+        }
+    fi
+
     # --- Install Hermes ---
     echo -e "  ${CYAN}↻${NC} Installing dependencies (this may take a minute)..."
     cd "$HERMES_DIR"
