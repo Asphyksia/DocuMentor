@@ -198,8 +198,8 @@ ETL_SERVICE=DOCLING
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 AUTH_TYPE=LOCAL
 
-# MCP Wrapper
-SURFSENSE_BASE_URL=http://localhost:8929
+# MCP Wrapper (inside Docker, backend is reachable as http://backend:8000)
+SURFSENSE_BASE_URL=http://backend:8000
 SURFSENSE_EMAIL=admin@documenter.local
 SURFSENSE_PASSWORD=${VAULT_PASSWORD}
 MCP_PORT=8000
