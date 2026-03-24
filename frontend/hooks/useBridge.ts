@@ -44,13 +44,23 @@ export function useBridge() {
   const listenersRef = useRef<Set<(msg: InboundMessage) => void>>(new Set());
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Avoid duplicate connections (React StrictMode double-invokes effects)
+    if (
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+    )
+      return;
     setBridgeState("connecting");
     setLastError(null);
 
     const ws = new WebSocket(BRIDGE_URL);
 
     ws.onopen = () => {
+      // Guard: if this socket was already replaced, close it silently
+      if (wsRef.current !== ws) {
+        ws.close();
+        return;
+      }
       setBridgeState("connected");
       setLastError(null);
       ws.send(JSON.stringify({ type: "status" }));
