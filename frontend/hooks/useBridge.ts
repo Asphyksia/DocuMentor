@@ -35,6 +35,7 @@ const RECONNECT_DELAY = 3000;
 export function useBridge() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<NodeJS.Timeout>();
+  const mountedRef = useRef(false);
   const [bridgeState, setBridgeState] = useState<BridgeState>("disconnected");
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     state: "ready",
@@ -43,81 +44,83 @@ export function useBridge() {
   const [lastError, setLastError] = useState<string | null>(null);
   const listenersRef = useRef<Set<(msg: InboundMessage) => void>>(new Set());
 
-  const connect = useCallback(() => {
-    // Avoid duplicate connections (React StrictMode double-invokes effects)
-    if (
-      wsRef.current?.readyState === WebSocket.OPEN ||
-      wsRef.current?.readyState === WebSocket.CONNECTING
-    )
-      return;
-    setBridgeState("connecting");
-    setLastError(null);
-
-    const ws = new WebSocket(BRIDGE_URL);
-
-    ws.onopen = () => {
-      // Guard: if this socket was already replaced, close it silently
-      if (wsRef.current !== ws) {
-        ws.close();
-        return;
-      }
-      setBridgeState("connected");
-      setLastError(null);
-      ws.send(JSON.stringify({ type: "status" }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as InboundMessage;
-
-        // Update system status automatically
-        if (msg.type === "status") {
-          setSystemStatus({
-            state: msg.payload.state,
-            message: msg.payload.message,
-          });
-        }
-
-        // Track errors
-        if (msg.type === "error") {
-          const errMsg = msg.payload.message ?? "Unknown error";
-          setLastError(errMsg);
-          // Clear error after 10s
-          setTimeout(() => setLastError(null), 10000);
-        }
-
-        // Clear error on successful results
-        if (msg.type === "result") {
-          setLastError(null);
-        }
-
-        // Notify all listeners
-        listenersRef.current.forEach((fn) => fn(msg));
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    ws.onclose = () => {
-      setBridgeState("disconnected");
-      wsRef.current = null;
-      reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
-    };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-
-    wsRef.current = ws;
-  }, []);
-
   useEffect(() => {
-    connect();
+    mountedRef.current = true;
+
+    function openConnection() {
+      if (!mountedRef.current) return;
+      if (
+        wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING
+      )
+        return;
+
+      setBridgeState("connecting");
+      setLastError(null);
+
+      const ws = new WebSocket(BRIDGE_URL);
+
+      ws.onopen = () => {
+        if (!mountedRef.current || wsRef.current !== ws) {
+          ws.close();
+          return;
+        }
+        setBridgeState("connected");
+        setLastError(null);
+        ws.send(JSON.stringify({ type: "status" }));
+      };
+
+      ws.onmessage = (event) => {
+        if (!mountedRef.current) return;
+        try {
+          const msg = JSON.parse(event.data) as InboundMessage;
+
+          if (msg.type === "status") {
+            setSystemStatus({
+              state: msg.payload.state,
+              message: msg.payload.message,
+            });
+          }
+
+          if (msg.type === "error") {
+            const errMsg = msg.payload.message ?? "Unknown error";
+            setLastError(errMsg);
+            setTimeout(() => setLastError(null), 10000);
+          }
+
+          if (msg.type === "result") {
+            setLastError(null);
+          }
+
+          listenersRef.current.forEach((fn) => fn(msg));
+        } catch {
+          // ignore malformed messages
+        }
+      };
+
+      ws.onclose = () => {
+        if (!mountedRef.current) return;
+        setBridgeState("disconnected");
+        wsRef.current = null;
+        reconnectTimer.current = setTimeout(openConnection, RECONNECT_DELAY);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+
+      wsRef.current = ws;
+    }
+
+    openConnection();
+
     return () => {
+      mountedRef.current = false;
       clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
+      wsRef.current = null;
     };
-  }, [connect]);
+  }, []);
 
   // -- Send ----------------------------------------------------------------
 
