@@ -1,61 +1,84 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  OutboundMessage,
+  InboundMessage,
+  ConnectionState,
+} from "../types/bridge";
 
 // ---------------------------------------------------------------------------
-// Types matching bridge.py protocol
+// Public types (re-exported for convenience)
 // ---------------------------------------------------------------------------
 
 export type BridgeState = "connecting" | "connected" | "disconnected";
 
 export type SystemStatus = {
-  state: "uploading" | "indexing" | "querying" | "ready" | "error";
+  state: ConnectionState;
   message: string;
 };
 
-export type InboundMessage = {
-  type: "result" | "status" | "documents" | "spaces" | "space_created" | "error";
-  payload: any;
-};
+export type { InboundMessage, OutboundMessage };
 
-export type OutboundMessage = {
-  type: "upload" | "query" | "list_docs" | "list_spaces" | "create_space" | "extract" | "status";
-  payload?: any;
-};
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+const BRIDGE_URL =
+  process.env.NEXT_PUBLIC_BRIDGE_URL ?? "ws://localhost:8001/ws";
+const RECONNECT_DELAY = 3000;
 
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
 
-const BRIDGE_URL = process.env.NEXT_PUBLIC_BRIDGE_URL ?? "ws://localhost:8001/ws";
-const RECONNECT_DELAY = 3000;
-
 export function useBridge() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<NodeJS.Timeout>();
   const [bridgeState, setBridgeState] = useState<BridgeState>("disconnected");
-  const [systemStatus, setSystemStatus] = useState<SystemStatus>({ state: "ready", message: "" });
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
+    state: "ready",
+    message: "",
+  });
+  const [lastError, setLastError] = useState<string | null>(null);
   const listenersRef = useRef<Set<(msg: InboundMessage) => void>>(new Set());
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     setBridgeState("connecting");
+    setLastError(null);
 
     const ws = new WebSocket(BRIDGE_URL);
 
     ws.onopen = () => {
       setBridgeState("connected");
-      // Request initial status
+      setLastError(null);
       ws.send(JSON.stringify({ type: "status" }));
     };
 
     ws.onmessage = (event) => {
       try {
-        const msg: InboundMessage = JSON.parse(event.data);
+        const msg = JSON.parse(event.data) as InboundMessage;
 
         // Update system status automatically
         if (msg.type === "status") {
-          setSystemStatus(msg.payload);
+          setSystemStatus({
+            state: msg.payload.state,
+            message: msg.payload.message,
+          });
+        }
+
+        // Track errors
+        if (msg.type === "error") {
+          const errMsg = msg.payload.message ?? "Unknown error";
+          setLastError(errMsg);
+          // Clear error after 10s
+          setTimeout(() => setLastError(null), 10000);
+        }
+
+        // Clear error on successful results
+        if (msg.type === "result") {
+          setLastError(null);
         }
 
         // Notify all listeners
@@ -68,7 +91,6 @@ export function useBridge() {
     ws.onclose = () => {
       setBridgeState("disconnected");
       wsRef.current = null;
-      // Auto-reconnect
       reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY);
     };
 
@@ -79,7 +101,6 @@ export function useBridge() {
     wsRef.current = ws;
   }, []);
 
-  // Connect on mount
   useEffect(() => {
     connect();
     return () => {
@@ -88,20 +109,25 @@ export function useBridge() {
     };
   }, [connect]);
 
-  // Send a message to the bridge
+  // -- Send ----------------------------------------------------------------
+
   const send = useCallback((msg: OutboundMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(msg));
     }
   }, []);
 
-  // Subscribe to inbound messages
+  // -- Subscribe -----------------------------------------------------------
+
   const subscribe = useCallback((fn: (msg: InboundMessage) => void) => {
     listenersRef.current.add(fn);
-    return () => { listenersRef.current.delete(fn); };
+    return () => {
+      listenersRef.current.delete(fn);
+    };
   }, []);
 
-  // Convenience methods
+  // -- Convenience methods (typed) -----------------------------------------
+
   const uploadFile = useCallback(
     (file: File, searchSpaceId: number = 1) => {
       const reader = new FileReader();
@@ -109,29 +135,40 @@ export function useBridge() {
         const base64 = (reader.result as string).split(",")[1];
         send({
           type: "upload",
-          payload: { filename: file.name, data: base64, search_space_id: searchSpaceId },
+          payload: {
+            filename: file.name,
+            data: base64,
+            search_space_id: searchSpaceId,
+          },
         });
+      };
+      reader.onerror = () => {
+        setLastError(`Failed to read file: ${file.name}`);
       };
       reader.readAsDataURL(file);
     },
-    [send]
+    [send],
   );
 
   const query = useCallback(
     (text: string, searchSpaceId: number = 1, threadId?: string) => {
       send({
         type: "query",
-        payload: { query: text, search_space_id: searchSpaceId, thread_id: threadId },
+        payload: {
+          query: text,
+          search_space_id: searchSpaceId,
+          thread_id: threadId,
+        },
       });
     },
-    [send]
+    [send],
   );
 
   const listDocs = useCallback(
     (searchSpaceId: number = 1) => {
       send({ type: "list_docs", payload: { search_space_id: searchSpaceId } });
     },
-    [send]
+    [send],
   );
 
   const listSpaces = useCallback(() => {
@@ -140,14 +177,48 @@ export function useBridge() {
 
   const createSpace = useCallback(
     (name: string, description?: string) => {
-      send({ type: "create_space", payload: { name, description } });
+      send({
+        type: "create_space",
+        payload: { name, description: description ?? "" },
+      });
     },
-    [send]
+    [send],
+  );
+
+  const deleteDocument = useCallback(
+    (documentId: number, searchSpaceId?: number) => {
+      send({
+        type: "delete_document",
+        payload: { document_id: documentId, search_space_id: searchSpaceId },
+      });
+    },
+    [send],
+  );
+
+  const deleteSpace = useCallback(
+    (searchSpaceId: number) => {
+      send({
+        type: "delete_space",
+        payload: { search_space_id: searchSpaceId },
+      });
+    },
+    [send],
+  );
+
+  const searchDocuments = useCallback(
+    (title: string, searchSpaceId?: number) => {
+      send({
+        type: "search_documents",
+        payload: { title, search_space_id: searchSpaceId },
+      });
+    },
+    [send],
   );
 
   return {
     bridgeState,
     systemStatus,
+    lastError,
     send,
     subscribe,
     uploadFile,
@@ -155,5 +226,8 @@ export function useBridge() {
     listDocs,
     listSpaces,
     createSpace,
+    deleteDocument,
+    deleteSpace,
+    searchDocuments,
   };
 }
