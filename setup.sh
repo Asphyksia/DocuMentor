@@ -235,11 +235,12 @@ else
         fi
 
         # Run setup, skip the interactive wizard (answer 'n' to final prompt)
-        echo "n" | bash "$SCRIPT_DIR/hermes-agent/setup-hermes.sh" || {
-            echo -e "  ${YELLOW}⚠${NC}  Hermes installation had issues — you can install it later"
-            echo "    Run: cd hermes-agent && ./setup-hermes.sh"
-            echo "    DocuMentor works without Hermes (dashboard-only mode)"
-        }
+        echo "n" | bash "$SCRIPT_DIR/hermes-agent/setup-hermes.sh"
+        if [ $? -ne 0 ]; then
+            echo -e "  ${RED}✗${NC} Hermes installation failed"
+            echo "    Try manually: cd hermes-agent && ./setup-hermes.sh"
+            exit 1
+        fi
 
         # Reload PATH
         export PATH="$HOME/.local/bin:$PATH"
@@ -247,10 +248,14 @@ else
         if command -v hermes &> /dev/null; then
             echo -e "  ${GREEN}✓${NC} Hermes installed"
         else
-            echo -e "  ${YELLOW}⚠${NC}  Hermes not in PATH — dashboard will work, agent features need manual install"
+            echo -e "  ${RED}✗${NC} Hermes installed but 'hermes' command not found in PATH"
+            echo "    Add ~/.local/bin to your PATH and try again"
+            exit 1
         fi
     else
-        echo -e "  ${YELLOW}⚠${NC}  hermes-agent submodule not found — skipping (dashboard works without it)"
+        echo -e "  ${RED}✗${NC} hermes-agent submodule not found"
+        echo "    Run: git submodule update --init --recursive"
+        exit 1
     fi
 fi
 
