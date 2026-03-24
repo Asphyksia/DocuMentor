@@ -1,39 +1,39 @@
 """
 DocuMentor Bridge Server
 ------------------------
-WebSocket server that connects the Next.js dashboard to Hermes/MCP.
-Single point of communication — the dashboard never talks to MCP or SurfSense directly.
+WebSocket gateway between the Next.js dashboard and the MCP wrapper.
+The dashboard never talks to MCP or SurfSense directly.
 
-Protocol:
-  Client → Server:
-    { "type": "query",            "payload": { "query": "...", "search_space_id": 1 } }
-    { "type": "upload",           "payload": { "filename": "...", "data": "<base64>", "search_space_id": 1 } }
-    { "type": "list_docs",        "payload": { "search_space_id": 1 } }
-    { "type": "list_spaces" }
-    { "type": "create_space",     "payload": { "name": "...", "description": "..." } }
-    { "type": "extract",          "payload": { "doc_id": 1, "search_space_id": 1 } }
-    { "type": "delete_document",  "payload": { "document_id": 5, "search_space_id": 1 } }
-    { "type": "delete_space",     "payload": { "search_space_id": 2 } }
-    { "type": "search_documents", "payload": { "title": "budget", "search_space_id": 1 } }
-    { "type": "mcp_call",         "payload": { "tool": "<any_mcp_tool>", "args": { ... } } }
-    { "type": "status" }
+Design principles (v0.2.0 — hardened):
+  - Explicit message allowlist: only known message types are dispatched.
+  - Pydantic validation: every inbound payload is validated before processing.
+  - No generic passthrough: mcp_call removed. Each operation has a typed handler.
+  - Structured error responses with error codes.
+  - Upload size limit enforced before decoding.
+  - Timeouts on all downstream calls.
+  - Structured logging with operation context.
 
-  Server → Client:
-    { "type": "result",     "payload": { ... dashboard JSON ... } }
-    { "type": "status",     "payload": { "state": "uploading|indexing|querying|ready|error", "message": "..." } }
-    { "type": "documents",  "payload": { ... document list ... } }
-    { "type": "spaces",     "payload": { ... spaces list ... } }
-    { "type": "mcp_result", "payload": { "tool": "...", "result": { ... } } }
-    { "type": "error",      "payload": { "message": "..." } }
+Protocol — Client → Server:
+  { "type": "query",            "payload": { "query": "...", "search_space_id": 1 } }
+  { "type": "upload",           "payload": { "filename": "...", "data": "<base64>", "search_space_id": 1 } }
+  { "type": "list_docs",        "payload": { "search_space_id": 1 } }
+  { "type": "list_spaces" }
+  { "type": "create_space",     "payload": { "name": "...", "description": "..." } }
+  { "type": "extract",          "payload": { "doc_id": 1, "search_space_id": 1 } }
+  { "type": "delete_document",  "payload": { "document_id": 5, "search_space_id": 1 } }
+  { "type": "delete_space",     "payload": { "search_space_id": 2 } }
+  { "type": "search_documents", "payload": { "title": "budget", "search_space_id": 1 } }
+  { "type": "status" }
 
-Usage:
-  pip install fastapi uvicorn httpx python-multipart websockets
-  python backend/bridge.py
-
-Ports:
-  Bridge WebSocket: 8001
-  MCP Wrapper:      8000 (called internally)
+Protocol — Server → Client:
+  { "type": "result",     "payload": { ... } }
+  { "type": "status",     "payload": { "state": "...", "message": "..." } }
+  { "type": "documents",  "payload": { ... } }
+  { "type": "spaces",     "payload": { ... } }
+  { "type": "error",      "payload": { "code": "...", "message": "..." } }
 """
+
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -43,12 +43,13 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Config
@@ -56,11 +57,79 @@ from fastapi.middleware.cors import CORSMiddleware
 
 MCP_BASE = os.getenv("MCP_URL", "http://localhost:8000")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8001"))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+MCP_TIMEOUT = int(os.getenv("MCP_TIMEOUT", "120"))  # seconds
+HEALTH_TIMEOUT = 10
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("documenter-bridge")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("bridge")
 
-app = FastAPI(title="DocuMentor Bridge", version="0.1.0")
+# ---------------------------------------------------------------------------
+# Error codes
+# ---------------------------------------------------------------------------
+
+class ErrorCode:
+    INVALID_JSON = "INVALID_JSON"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    UNKNOWN_TYPE = "UNKNOWN_TYPE"
+    MCP_ERROR = "MCP_ERROR"
+    MCP_UNREACHABLE = "MCP_UNREACHABLE"
+    UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE"
+    UPLOAD_DECODE_FAILED = "UPLOAD_DECODE_FAILED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+# ---------------------------------------------------------------------------
+# Pydantic models — inbound payloads
+# ---------------------------------------------------------------------------
+
+class QueryPayload(BaseModel):
+    query: str = Field(..., min_length=1, max_length=4000)
+    search_space_id: int = Field(..., gt=0)
+    thread_id: Optional[str] = None
+
+class UploadPayload(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    data: str = Field(..., min_length=1)  # base64
+    search_space_id: int = Field(..., gt=0)
+
+    @field_validator("filename")
+    @classmethod
+    def sanitize_filename(cls, v: str) -> str:
+        safe = Path(v).name  # strip path traversal
+        if not safe:
+            raise ValueError("Invalid filename")
+        return safe
+
+class ListDocsPayload(BaseModel):
+    search_space_id: int = Field(..., gt=0)
+
+class CreateSpacePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="", max_length=1000)
+
+class ExtractPayload(BaseModel):
+    doc_id: int = Field(..., gt=0)
+    search_space_id: int = Field(..., gt=0)
+
+class DeleteDocumentPayload(BaseModel):
+    document_id: int = Field(..., gt=0)
+    search_space_id: Optional[int] = None
+
+class DeleteSpacePayload(BaseModel):
+    search_space_id: int = Field(..., gt=0)
+
+class SearchDocumentsPayload(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    search_space_id: Optional[int] = None
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
+
+app = FastAPI(title="DocuMentor Bridge", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,57 +145,94 @@ app.add_middleware(
 
 active_connections: set[WebSocket] = set()
 
-
-async def broadcast(message: dict):
-    """Send a message to all connected clients."""
-    text = json.dumps(message, ensure_ascii=False)
-    dead = set()
-    for ws in active_connections:
-        try:
-            await ws.send_text(text)
-        except Exception:
-            dead.add(ws)
-    active_connections.difference_update(dead)
-
-
 # ---------------------------------------------------------------------------
-# MCP client
+# MCP client — single reusable httpx client
 # ---------------------------------------------------------------------------
+
+_mcp_client: httpx.AsyncClient | None = None
+
+
+def get_mcp_client() -> httpx.AsyncClient:
+    global _mcp_client
+    if _mcp_client is None or _mcp_client.is_closed:
+        _mcp_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(MCP_TIMEOUT, connect=10),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _mcp_client
+
 
 async def mcp_call(tool: str, args: dict) -> dict:
-    """Call a tool on the MCP wrapper via JSON-RPC."""
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{MCP_BASE}/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": int(time.time() * 1000),
-                "method": "tools/call",
-                "params": {"name": tool, "arguments": args},
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if "error" in data and data["error"]:
-            raise Exception(data["error"].get("message", "MCP error"))
-        content = data["result"]["content"][0]["text"]
-        return json.loads(content)
+    """Call a tool on the MCP wrapper via JSON-RPC. Raises on failure."""
+    client = get_mcp_client()
+    resp = await client.post(
+        f"{MCP_BASE}/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": int(time.time() * 1000),
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
+    if "error" in data and data["error"]:
+        msg = data["error"].get("message", "MCP error")
+        raise MCPError(msg)
+
+    result = data.get("result", {})
+    content_list = result.get("content", [])
+    if not content_list:
+        raise MCPError("Empty response from MCP tool")
+
+    text = content_list[0].get("text", "{}")
+    return json.loads(text)
+
+
+class MCPError(Exception):
+    """Raised when the MCP wrapper returns an error."""
+    pass
 
 # ---------------------------------------------------------------------------
-# Message handlers
+# Response helpers
 # ---------------------------------------------------------------------------
 
-async def handle_status(ws: WebSocket):
-    """Return system health status."""
+async def send_error(ws: WebSocket, code: str, message: str, **extra: Any) -> None:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    payload.update(extra)
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            mcp_health = await client.get(f"{MCP_BASE}/health")
+        await ws.send_json({"type": "error", "payload": payload})
+    except Exception:
+        pass  # connection already dead
+
+
+async def send_status(ws: WebSocket, state: str, message: str) -> None:
+    try:
+        await ws.send_json({"type": "status", "payload": {"state": state, "message": message}})
+    except Exception:
+        pass
+
+
+async def send_json(ws: WebSocket, msg: dict) -> None:
+    try:
+        await ws.send_json(msg)
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
+async def handle_status(ws: WebSocket, _payload: dict) -> None:
+    try:
+        client = get_mcp_client()
+        mcp_health = await client.get(f"{MCP_BASE}/health", timeout=HEALTH_TIMEOUT)
         mcp_ok = mcp_health.status_code == 200
     except Exception:
         mcp_ok = False
 
-    await ws.send_json({
+    await send_json(ws, {
         "type": "status",
         "payload": {
             "state": "ready" if mcp_ok else "error",
@@ -136,325 +242,284 @@ async def handle_status(ws: WebSocket):
     })
 
 
-async def handle_list_spaces(ws: WebSocket):
-    """List search spaces."""
+async def handle_list_spaces(ws: WebSocket, _payload: dict) -> None:
     try:
         result = await mcp_call("surfsense_list_spaces", {})
-        await ws.send_json({"type": "spaces", "payload": result})
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        await send_json(ws, {"type": "spaces", "payload": result})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("list_spaces failed: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, f"Failed to list spaces: {e}")
 
 
-async def handle_create_space(ws: WebSocket, payload: dict):
-    """Create a new search space."""
+async def handle_create_space(ws: WebSocket, payload: dict) -> None:
+    data = CreateSpacePayload(**payload)
     try:
         result = await mcp_call("surfsense_create_space", {
-            "name": payload["name"],
-            "description": payload.get("description", ""),
+            "name": data.name,
+            "description": data.description,
         })
-        await ws.send_json({"type": "space_created", "payload": result})
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        await send_json(ws, {"type": "space_created", "payload": result})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("create_space failed: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, f"Failed to create space: {e}")
 
 
-async def handle_list_docs(ws: WebSocket, payload: dict):
-    """List documents in a search space."""
+async def handle_list_docs(ws: WebSocket, payload: dict) -> None:
+    data = ListDocsPayload(**payload)
     try:
         result = await mcp_call("surfsense_list_documents", {
-            "search_space_id": payload["search_space_id"],
+            "search_space_id": data.search_space_id,
         })
-        await ws.send_json({"type": "documents", "payload": result})
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        await send_json(ws, {"type": "documents", "payload": result})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("list_docs failed: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, f"Failed to list documents: {e}")
 
 
-async def handle_upload(ws: WebSocket, payload: dict):
-    """
-    Upload a file: receive base64 data, save to temp, send to MCP,
-    poll for indexing completion, then extract structured data.
-    """
-    filename = payload.get("filename", "unknown")
-    file_data = payload.get("data", "")
-    search_space_id = payload.get("search_space_id", 1)
+async def handle_upload(ws: WebSocket, payload: dict) -> None:
+    data = UploadPayload(**payload)
+
+    # --- Size check (base64 is ~33% overhead, so b64 len * 0.75 ≈ raw size) ---
+    estimated_size = len(data.data) * 3 // 4
+    if estimated_size > MAX_UPLOAD_BYTES:
+        limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        await send_error(ws, ErrorCode.UPLOAD_TOO_LARGE,
+                         f"File exceeds {limit_mb}MB limit (estimated {estimated_size // (1024*1024)}MB)")
+        return
 
     try:
-        # Status: uploading
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "uploading", "message": f"Uploading {filename}..."},
-        })
+        await send_status(ws, "uploading", f"Uploading {data.filename}...")
 
-        # Decode and save to temp file
-        raw_bytes = base64.b64decode(file_data)
-        suffix = Path(filename).suffix
+        # Decode base64
+        try:
+            raw_bytes = base64.b64decode(data.data, validate=True)
+        except Exception:
+            await send_error(ws, ErrorCode.UPLOAD_DECODE_FAILED, "Invalid base64 data")
+            return
+
+        # Free the b64 string from memory immediately
+        del data.data
+
+        suffix = Path(data.filename).suffix
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="documenter-")
         tmp.write(raw_bytes)
         tmp.close()
+        del raw_bytes  # free
 
         # Upload via MCP
         upload_result = await mcp_call("surfsense_upload", {
             "file_path": tmp.name,
-            "search_space_id": search_space_id,
+            "search_space_id": data.search_space_id,
         })
 
         doc_ids = upload_result.get("document_ids", [])
-
-        # Status: indexing
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "indexing", "message": f"Indexing {filename}..."},
-        })
-
-        # Poll for document readiness (max 60s) using batch status endpoint
         doc_id = doc_ids[0] if doc_ids else None
+
+        # Poll for readiness (max 60s)
+        await send_status(ws, "indexing", f"Indexing {data.filename}...")
+
         if doc_id:
-            for _ in range(30):
+            for attempt in range(30):
                 await asyncio.sleep(2)
                 try:
                     status = await mcp_call("surfsense_document_status", {
-                        "search_space_id": search_space_id,
+                        "search_space_id": data.search_space_id,
                         "document_ids": str(doc_id),
                     })
                     items = status.get("items", [])
                     if items and items[0].get("state") == "ready":
                         break
+                    if items and items[0].get("state") == "error":
+                        reason = items[0].get("reason", "Unknown indexing error")
+                        await send_error(ws, ErrorCode.MCP_ERROR, f"Indexing failed: {reason}")
+                        return
                 except Exception:
-                    # Fallback to list_documents if status endpoint fails
-                    docs = await mcp_call("surfsense_list_documents", {
-                        "search_space_id": search_space_id,
-                    })
-                    doc_list = docs.get("documents", [])
-                    target = next((d for d in doc_list if d["id"] == doc_id), None)
-                    if target and target.get("status") == "ready":
-                        break
-
-            # Status: extracting
-            await ws.send_json({
-                "type": "status",
-                "payload": {"state": "querying", "message": f"Analyzing {filename}..."},
-            })
+                    # Fallback: check doc list
+                    try:
+                        docs = await mcp_call("surfsense_list_documents", {
+                            "search_space_id": data.search_space_id,
+                        })
+                        doc_list = docs.get("documents", [])
+                        target = next((d for d in doc_list if d["id"] == doc_id), None)
+                        if target and target.get("status") == "ready":
+                            break
+                    except Exception:
+                        pass
 
             # Extract structured data
+            await send_status(ws, "querying", f"Analyzing {data.filename}...")
             extracted = await mcp_call("surfsense_extract_tables", {
                 "doc_id": doc_id,
-                "search_space_id": search_space_id,
+                "search_space_id": data.search_space_id,
             })
-
             dashboard = extracted.get("dashboard", {})
         else:
             dashboard = {
                 "type": "generic",
-                "summary": f"File {filename} uploaded but no structured data extracted.",
+                "summary": f"File {data.filename} uploaded but no structured data extracted.",
                 "views": [],
             }
 
-        # Clean up temp file
+        # Clean up
         try:
             os.unlink(tmp.name)
         except OSError:
             pass
 
-        # Send result
-        await ws.send_json({
+        await send_json(ws, {
             "type": "result",
             "payload": {
                 "action": "upload",
-                "filename": filename,
+                "filename": data.filename,
                 "doc_id": doc_id,
                 "dashboard": dashboard,
             },
         })
+        await send_status(ws, "ready", f"{data.filename} processed successfully")
 
-        # Status: ready
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "ready", "message": f"{filename} processed successfully"},
-        })
+        # Refresh doc list
+        await handle_list_docs(ws, {"search_space_id": data.search_space_id})
 
-        # Send updated document list
-        await handle_list_docs(ws, {"search_space_id": search_space_id})
-
+    except (MCPError, httpx.HTTPError) as e:
+        logger.exception("Upload error for %s", data.filename)
+        await send_status(ws, "error", f"Upload failed: {e}")
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
     except Exception as e:
-        logger.exception("Upload error")
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "error", "message": f"Upload failed: {e}"},
-        })
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        logger.exception("Unexpected upload error for %s", data.filename)
+        await send_status(ws, "error", "Upload failed unexpectedly")
+        await send_error(ws, ErrorCode.INTERNAL_ERROR, "An internal error occurred during upload")
 
 
-async def handle_query(ws: WebSocket, payload: dict):
-    """Natural language query against the knowledge base."""
-    query = payload.get("query", "")
-    search_space_id = payload.get("search_space_id", 1)
-    thread_id = payload.get("thread_id")
+async def handle_query(ws: WebSocket, payload: dict) -> None:
+    data = QueryPayload(**payload)
 
     try:
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "querying", "message": "Searching documents..."},
-        })
+        await send_status(ws, "querying", "Searching documents...")
 
-        args = {"query": query, "search_space_id": search_space_id}
-        if thread_id:
-            args["thread_id"] = thread_id
+        args: dict[str, Any] = {"query": data.query, "search_space_id": data.search_space_id}
+        if data.thread_id:
+            args["thread_id"] = data.thread_id
 
         result = await mcp_call("surfsense_query", args)
 
-        await ws.send_json({
+        await send_json(ws, {
             "type": "result",
             "payload": {
                 "action": "query",
-                "query": query,
+                "query": data.query,
                 "thread_id": result.get("thread_id"),
                 "dashboard": result.get("dashboard", {}),
             },
         })
+        await send_status(ws, "ready", "Query complete")
 
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "ready", "message": "Query complete"},
-        })
-
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("Query error: %s", e)
+        await send_status(ws, "error", f"Query failed: {e}")
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
     except Exception as e:
-        logger.exception("Query error")
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "error", "message": f"Query failed: {e}"},
-        })
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        logger.exception("Unexpected query error")
+        await send_status(ws, "error", "Query failed unexpectedly")
+        await send_error(ws, ErrorCode.INTERNAL_ERROR, "An internal error occurred during query")
 
 
-async def handle_extract(ws: WebSocket, payload: dict):
-    """Extract tables from a specific document."""
-    doc_id = payload.get("doc_id")
-    search_space_id = payload.get("search_space_id", 1)
+async def handle_extract(ws: WebSocket, payload: dict) -> None:
+    data = ExtractPayload(**payload)
 
     try:
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "querying", "message": "Extracting data..."},
-        })
+        await send_status(ws, "querying", "Extracting data...")
 
         result = await mcp_call("surfsense_extract_tables", {
-            "doc_id": doc_id,
-            "search_space_id": search_space_id,
+            "doc_id": data.doc_id,
+            "search_space_id": data.search_space_id,
         })
 
-        await ws.send_json({
+        await send_json(ws, {
             "type": "result",
             "payload": {
                 "action": "extract",
-                "doc_id": doc_id,
+                "doc_id": data.doc_id,
                 "dashboard": result.get("dashboard", {}),
             },
         })
+        await send_status(ws, "ready", "Extraction complete")
 
-        await ws.send_json({
-            "type": "status",
-            "payload": {"state": "ready", "message": "Extraction complete"},
-        })
-
-    except Exception as e:
-        logger.exception("Extract error")
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("Extract error: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
 
 
-# ---------------------------------------------------------------------------
-# Generic MCP passthrough — exposes ALL 25 tools to the dashboard
-# ---------------------------------------------------------------------------
+async def handle_delete_document(ws: WebSocket, payload: dict) -> None:
+    data = DeleteDocumentPayload(**payload)
 
-async def handle_mcp_call(ws: WebSocket, payload: dict):
-    """
-    Generic passthrough: call any MCP tool by name.
-    Client sends: { "type": "mcp_call", "payload": { "tool": "surfsense_delete_document", "args": { "document_id": 5 } } }
-    Server returns: { "type": "mcp_result", "payload": { "tool": "...", "result": { ... } } }
-    """
-    tool = payload.get("tool", "")
-    args = payload.get("args", {})
-    request_id = payload.get("request_id")
-
-    if not tool:
-        await ws.send_json({"type": "error", "payload": {"message": "Missing 'tool' in mcp_call"}})
-        return
-
-    try:
-        result = await mcp_call(tool, args)
-        response: dict[str, Any] = {
-            "type": "mcp_result",
-            "payload": {"tool": tool, "result": result},
-        }
-        if request_id:
-            response["payload"]["request_id"] = request_id
-        await ws.send_json(response)
-    except Exception as e:
-        logger.error("MCP passthrough error (%s): %s", tool, e)
-        response = {"type": "error", "payload": {"message": str(e), "tool": tool}}
-        if request_id:
-            response["payload"]["request_id"] = request_id
-        await ws.send_json(response)
-
-
-async def handle_delete_document(ws: WebSocket, payload: dict):
-    """Delete a document and refresh the list."""
     try:
         result = await mcp_call("surfsense_delete_document", {
-            "document_id": payload["document_id"],
+            "document_id": data.document_id,
         })
-        await ws.send_json({"type": "mcp_result", "payload": {"tool": "surfsense_delete_document", "result": result}})
-        # Refresh doc list
-        if "search_space_id" in payload:
-            await handle_list_docs(ws, {"search_space_id": payload["search_space_id"]})
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        await send_json(ws, {
+            "type": "result",
+            "payload": {"action": "delete_document", "document_id": data.document_id, "result": result},
+        })
+        if data.search_space_id:
+            await handle_list_docs(ws, {"search_space_id": data.search_space_id})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("Delete document error: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
 
 
-async def handle_delete_space(ws: WebSocket, payload: dict):
-    """Delete a search space and refresh the list."""
+async def handle_delete_space(ws: WebSocket, payload: dict) -> None:
+    data = DeleteSpacePayload(**payload)
+
     try:
         result = await mcp_call("surfsense_delete_space", {
-            "search_space_id": payload["search_space_id"],
+            "search_space_id": data.search_space_id,
         })
-        await ws.send_json({"type": "mcp_result", "payload": {"tool": "surfsense_delete_space", "result": result}})
-        await handle_list_spaces(ws)
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
+        await send_json(ws, {
+            "type": "result",
+            "payload": {"action": "delete_space", "search_space_id": data.search_space_id, "result": result},
+        })
+        await handle_list_spaces(ws, {})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("Delete space error: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
 
 
-async def handle_search_documents(ws: WebSocket, payload: dict):
-    """Search documents by title."""
+async def handle_search_documents(ws: WebSocket, payload: dict) -> None:
+    data = SearchDocumentsPayload(**payload)
+
     try:
-        result = await mcp_call("surfsense_search_documents", {
-            "title": payload["title"],
-            "search_space_id": payload.get("search_space_id"),
-        })
-        await ws.send_json({"type": "documents", "payload": result})
-    except Exception as e:
-        await ws.send_json({"type": "error", "payload": {"message": str(e)}})
-
+        args: dict[str, Any] = {"title": data.title}
+        if data.search_space_id:
+            args["search_space_id"] = data.search_space_id
+        result = await mcp_call("surfsense_search_documents", args)
+        await send_json(ws, {"type": "documents", "payload": result})
+    except (MCPError, httpx.HTTPError) as e:
+        logger.error("Search documents error: %s", e)
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
 
 # ---------------------------------------------------------------------------
-# Dispatcher
+# Dispatcher — explicit allowlist, no generic passthrough
 # ---------------------------------------------------------------------------
 
-HANDLERS = {
-    "status": lambda ws, _: handle_status(ws),
-    "list_spaces": lambda ws, _: handle_list_spaces(ws),
-    "create_space": lambda ws, p: handle_create_space(ws, p),
-    "list_docs": lambda ws, p: handle_list_docs(ws, p),
-    "upload": lambda ws, p: handle_upload(ws, p),
-    "query": lambda ws, p: handle_query(ws, p),
-    "extract": lambda ws, p: handle_extract(ws, p),
-    "delete_document": lambda ws, p: handle_delete_document(ws, p),
-    "delete_space": lambda ws, p: handle_delete_space(ws, p),
-    "search_documents": lambda ws, p: handle_search_documents(ws, p),
-    "mcp_call": lambda ws, p: handle_mcp_call(ws, p),
+HANDLERS: dict[str, Any] = {
+    "status":           handle_status,
+    "list_spaces":      handle_list_spaces,
+    "create_space":     handle_create_space,
+    "list_docs":        handle_list_docs,
+    "upload":           handle_upload,
+    "query":            handle_query,
+    "extract":          handle_extract,
+    "delete_document":  handle_delete_document,
+    "delete_space":     handle_delete_space,
+    "search_documents": handle_search_documents,
 }
-
 
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
+
+MAX_WS_MESSAGE_SIZE = 75 * 1024 * 1024  # 75 MB (base64 overhead for 50MB files)
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -465,39 +530,73 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
+
+            # Basic size guard
+            if len(raw) > MAX_WS_MESSAGE_SIZE:
+                await send_error(ws, ErrorCode.UPLOAD_TOO_LARGE, "Message too large")
+                continue
+
+            # Parse JSON
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
-                await ws.send_json({
-                    "type": "error",
-                    "payload": {"message": "Invalid JSON"},
-                })
+                await send_error(ws, ErrorCode.INVALID_JSON, "Invalid JSON")
+                continue
+
+            if not isinstance(msg, dict):
+                await send_error(ws, ErrorCode.INVALID_JSON, "Message must be a JSON object")
                 continue
 
             msg_type = msg.get("type", "")
             payload = msg.get("payload", {})
 
+            if not isinstance(payload, dict):
+                payload = {}
+
             handler = HANDLERS.get(msg_type)
-            if handler:
-                # Run handler as task so we don't block the receive loop
-                asyncio.create_task(handler(ws, payload))
-            else:
-                await ws.send_json({
-                    "type": "error",
-                    "payload": {"message": f"Unknown message type: {msg_type}"},
-                })
+            if not handler:
+                await send_error(ws, ErrorCode.UNKNOWN_TYPE, f"Unknown message type: {msg_type}")
+                continue
+
+            # Validate & dispatch
+            try:
+                asyncio.create_task(_safe_handle(handler, ws, payload, msg_type))
+            except Exception as e:
+                logger.exception("Failed to create handler task for %s", msg_type)
+                await send_error(ws, ErrorCode.INTERNAL_ERROR, "Internal error")
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
+    except Exception:
         logger.exception("WebSocket error")
     finally:
         active_connections.discard(ws)
         logger.info("Client disconnected (%d remaining)", len(active_connections))
 
 
+async def _safe_handle(handler, ws: WebSocket, payload: dict, msg_type: str) -> None:
+    """Wrapper that catches validation and unexpected errors per handler."""
+    try:
+        await handler(ws, payload)
+    except (ValueError, TypeError) as e:
+        # Pydantic validation errors surface here
+        logger.warning("Validation error for %s: %s", msg_type, e)
+        await send_error(ws, ErrorCode.VALIDATION_ERROR, str(e))
+    except httpx.ConnectError:
+        logger.error("MCP unreachable for %s", msg_type)
+        await send_error(ws, ErrorCode.MCP_UNREACHABLE, "MCP wrapper is not reachable")
+    except httpx.TimeoutException:
+        logger.error("MCP timeout for %s", msg_type)
+        await send_error(ws, ErrorCode.MCP_ERROR, "Request timed out")
+    except MCPError as e:
+        logger.error("MCP error for %s: %s", msg_type, e)
+        await send_error(ws, ErrorCode.MCP_ERROR, str(e))
+    except Exception as e:
+        logger.exception("Unexpected error in handler %s", msg_type)
+        await send_error(ws, ErrorCode.INTERNAL_ERROR, "An internal error occurred")
+
 # ---------------------------------------------------------------------------
-# REST endpoints (for health checks and debugging)
+# REST endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
@@ -505,20 +604,26 @@ async def health():
     return {
         "status": "ok",
         "service": "documenter-bridge",
+        "version": "0.2.0",
         "clients": len(active_connections),
     }
 
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
 
-@app.get("/connections")
-async def connections():
-    return {"count": len(active_connections)}
-
+@app.on_event("shutdown")
+async def shutdown():
+    global _mcp_client
+    if _mcp_client and not _mcp_client.is_closed:
+        await _mcp_client.aclose()
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info("Starting DocuMentor Bridge on port %s", BRIDGE_PORT)
+    logger.info("Starting DocuMentor Bridge v0.2.0 on port %s", BRIDGE_PORT)
     logger.info("MCP wrapper: %s", MCP_BASE)
+    logger.info("Max upload: %d MB", MAX_UPLOAD_BYTES // (1024 * 1024))
     uvicorn.run(app, host="0.0.0.0", port=BRIDGE_PORT, log_level="info")
