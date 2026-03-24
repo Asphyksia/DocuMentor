@@ -3,232 +3,166 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import AppHeader, { type TabId } from "../components/AppHeader";
-import DocSidebar, { type DocItem } from "../components/DocSidebar";
-import ChatPanel, { type ChatMessage } from "../components/ChatPanel";
+import DocSidebar from "../components/DocSidebar";
+import ChatPanel from "../components/ChatPanel";
 import UploadModal from "../components/UploadModal";
 import SettingsPanel from "../components/SettingsPanel";
 import DashboardRenderer from "../DashboardRenderer";
-import { useBridge, type InboundMessage, type SystemStatus } from "../hooks/useBridge";
+import { useBridge } from "../hooks/useBridge";
+import { useChatState } from "../hooks/useChatState";
+import { useDashboardState } from "../hooks/useDashboardState";
+import { useDocumentsState, type DocItem } from "../hooks/useDocumentsState";
+import { useUploadState } from "../hooks/useUploadState";
+import type { InboundMessage, DashboardData } from "../types/bridge";
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Config
 // ---------------------------------------------------------------------------
 
 const DEFAULT_SPACE_ID = parseInt(
   process.env.NEXT_PUBLIC_DEFAULT_SPACE_ID ?? "1"
 );
 
-const WELCOME: ChatMessage = {
-  id: "welcome",
-  role: "agent",
-  content:
-    "Hello! I'm DocuMentor, your university document assistant. Upload a document or ask me anything about your indexed files.",
-  timestamp: Date.now(),
-};
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function Home() {
-  // Bridge
-  const {
-    bridgeState,
-    systemStatus,
-    subscribe,
-    uploadFile,
-    query,
-    listDocs,
-    listSpaces,
-    createSpace,
-  } = useBridge();
+  // --- Hooks ---
+  const bridge = useBridge();
+  const chat = useChatState();
+  const dash = useDashboardState();
+  const docs = useDocumentsState(DEFAULT_SPACE_ID);
+  const upload = useUploadState();
 
-  // UI state
   const [activeTab, setActiveTab] = useState<TabId>("chat");
-  const [showUpload, setShowUpload] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<SystemStatus["state"]>("ready");
-  const [uploadMessage, setUploadMessage] = useState("");
 
-  // Data state
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
-  const [input, setInput] = useState("");
-  const [isQuerying, setIsQuerying] = useState(false);
-  const [documents, setDocuments] = useState<DocItem[]>([]);
-  const [activeDocId, setActiveDocId] = useState<number | null>(null);
-  const [spaces, setSpaces] = useState<{ id: number; name: string; description?: string }[]>([]);
-  const [activeSpaceId, setActiveSpaceId] = useState(DEFAULT_SPACE_ID);
-  const [lastDashboard, setLastDashboard] = useState<any>(null);
-  const [docsLoading, setDocsLoading] = useState(true);
-
-  // ---- Bridge message handler ----
+  // --- Bridge message dispatcher ---
   useEffect(() => {
-    const unsub = subscribe((msg: InboundMessage) => {
+    const unsub = bridge.subscribe((msg: InboundMessage) => {
       switch (msg.type) {
         case "status":
-          setUploadStatus(msg.payload.state);
-          setUploadMessage(msg.payload.message ?? "");
+          upload.updateFromBridge(msg.payload.state, msg.payload.message ?? "");
           if (msg.payload.state === "ready") {
-            setIsQuerying(false);
+            chat.setIsQuerying(false);
           }
           break;
 
         case "result": {
-          const { action, dashboard, filename, query: q, doc_id } = msg.payload;
+          const p = msg.payload;
 
-          if (action === "upload" && dashboard) {
-            setLastDashboard(dashboard);
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.isLoading && m.role === "agent"
-                  ? {
-                      ...m,
-                      isLoading: false,
-                      content: `I've processed **${filename}**. Here's what I found:`,
-                      dashboard,
-                      filename,
-                    }
-                  : m
-              )
+          if (p.action === "upload" && p.dashboard) {
+            const dashboard = p.dashboard as DashboardData;
+            dash.updateDashboard(dashboard);
+            chat.resolveAgent(
+              `I've processed **${p.filename ?? "your file"}**. Here's what I found:`,
+              dashboard,
+              p.filename
             );
-            if (doc_id) setActiveDocId(doc_id);
+            if (p.doc_id) docs.setActiveDocId(p.doc_id);
           }
 
-          if (action === "query" && dashboard) {
-            setLastDashboard(dashboard);
-            const summary = dashboard?.summary ?? dashboard?.content ?? "Here are the results:";
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.isLoading && m.role === "agent"
-                  ? { ...m, isLoading: false, content: summary, dashboard }
-                  : m
-              )
-            );
+          if (p.action === "query" && p.dashboard) {
+            const dashboard = p.dashboard as DashboardData;
+            dash.updateDashboard(dashboard);
+            const summary =
+              ("summary" in dashboard ? (dashboard as { summary?: string }).summary : undefined) ??
+              ("content" in dashboard ? (dashboard as { content?: string }).content : undefined) ??
+              "Here are the results:";
+            chat.resolveAgent(summary, dashboard);
           }
 
-          if (action === "extract" && dashboard) {
-            setLastDashboard(dashboard);
+          if (p.action === "extract" && p.dashboard) {
+            dash.updateDashboard(p.dashboard as DashboardData);
           }
           break;
         }
 
         case "documents":
-          setDocuments(msg.payload.documents ?? []);
-          setDocsLoading(false);
+          docs.updateDocuments(msg.payload.documents ?? []);
           break;
 
         case "spaces":
-          setSpaces(msg.payload.spaces ?? []);
+          docs.updateSpaces(msg.payload.spaces ?? []);
           break;
 
         case "space_created":
-          listSpaces();
+          bridge.listSpaces();
           break;
 
         case "error":
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.isLoading && m.role === "agent"
-                ? {
-                    ...m,
-                    isLoading: false,
-                    content: `Something went wrong: ${msg.payload.message}`,
-                  }
-                : m
-            )
-          );
-          setIsQuerying(false);
+          chat.resolveAgentError(msg.payload.message);
           break;
       }
     });
     return unsub;
-  }, [subscribe, listSpaces]);
-
-  // ---- Load initial data when connected ----
-  useEffect(() => {
-    if (bridgeState === "connected") {
-      listDocs(activeSpaceId);
-      listSpaces();
-    }
-  }, [bridgeState, activeSpaceId, listDocs, listSpaces]);
-
-  // ---- Upload handler ----
-  const handleUpload = useCallback(
-    (file: File) => {
-      const userMsg: ChatMessage = {
-        id: Date.now().toString(),
-        role: "user",
-        content: `📎 ${file.name}`,
-        timestamp: Date.now(),
-      };
-      const agentMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: "agent",
-        content: "",
-        isLoading: true,
-        filename: file.name,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg, agentMsg]);
-      setActiveTab("chat");
-      uploadFile(file, activeSpaceId);
-    },
-    [uploadFile, activeSpaceId]
-  );
-
-  // ---- Query handler ----
-  const handleSend = useCallback(() => {
-    const text = input.trim();
-    if (!text || isQuerying) return;
-
-    setInput("");
-    setIsQuerying(true);
-
-    const userMsg: ChatMessage = {
-      id: Date.now().toString(),
-      role: "user",
-      content: text,
-      timestamp: Date.now(),
-    };
-    const agentMsg: ChatMessage = {
-      id: (Date.now() + 1).toString(),
-      role: "agent",
-      content: "",
-      isLoading: true,
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, userMsg, agentMsg]);
-    query(text, activeSpaceId);
-  }, [input, isQuerying, query, activeSpaceId]);
-
-  // ---- Doc selection ----
-  const handleSelectDoc = useCallback((doc: DocItem) => {
-    setActiveDocId(doc.id);
-    setActiveTab("dashboard");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Tab content ----
+  // --- Load initial data ---
+  useEffect(() => {
+    if (bridge.bridgeState === "connected") {
+      bridge.listDocs(docs.activeSpaceId);
+      bridge.listSpaces();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge.bridgeState, docs.activeSpaceId]);
+
+  // --- Upload handler ---
+  const handleUpload = useCallback(
+    (file: File) => {
+      chat.addUserMessage(`📎 ${file.name}`);
+      chat.addLoadingAgent(file.name);
+      setActiveTab("chat");
+      bridge.uploadFile(file, docs.activeSpaceId);
+    },
+    [bridge, chat, docs.activeSpaceId]
+  );
+
+  // --- Query handler ---
+  const handleSend = useCallback(() => {
+    const text = chat.input.trim();
+    if (!text || chat.isQuerying) return;
+
+    chat.clearInput();
+    chat.setIsQuerying(true);
+    chat.addUserMessage(text);
+    chat.addLoadingAgent();
+    bridge.query(text, docs.activeSpaceId);
+  }, [bridge, chat, docs.activeSpaceId]);
+
+  // --- Doc selection ---
+  const handleSelectDoc = useCallback(
+    (doc: DocItem) => {
+      docs.setActiveDocId(doc.id);
+      setActiveTab("dashboard");
+    },
+    [docs]
+  );
+
+  // --- Tab content ---
   const renderTab = () => {
     switch (activeTab) {
       case "chat":
         return (
           <ChatPanel
-            messages={messages}
-            input={input}
-            onInputChange={setInput}
+            messages={chat.messages}
+            input={chat.input}
+            onInputChange={chat.setInput}
             onSend={handleSend}
-            isQuerying={isQuerying}
+            isQuerying={chat.isQuerying}
           />
         );
       case "dashboard":
         return (
           <div className="p-6 overflow-y-auto h-full">
-            {lastDashboard ? (
+            {dash.dashboard ? (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
               >
-                <DashboardRenderer data={lastDashboard} />
+                <DashboardRenderer data={dash.dashboard} />
               </motion.div>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500 text-sm">
@@ -240,10 +174,10 @@ export default function Home() {
       case "settings":
         return (
           <SettingsPanel
-            spaces={spaces}
-            activeSpaceId={activeSpaceId}
-            onChangeSpace={setActiveSpaceId}
-            onCreateSpace={(name, desc) => createSpace(name, desc)}
+            spaces={docs.spaces}
+            activeSpaceId={docs.activeSpaceId}
+            onChangeSpace={docs.setActiveSpaceId}
+            onCreateSpace={(name, desc) => bridge.createSpace(name, desc)}
           />
         );
     }
@@ -251,26 +185,22 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-gray-100 overflow-hidden">
-      {/* Header */}
       <AppHeader
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        bridgeState={bridgeState}
-        systemStatus={systemStatus}
+        bridgeState={bridge.bridgeState}
+        systemStatus={bridge.systemStatus}
       />
 
-      {/* Body */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
         <DocSidebar
-          documents={documents}
-          activeDocId={activeDocId}
+          documents={docs.documents}
+          activeDocId={docs.activeDocId}
           onSelectDoc={handleSelectDoc}
-          onUploadClick={() => setShowUpload(true)}
-          isLoading={docsLoading}
+          onUploadClick={upload.openModal}
+          isLoading={docs.docsLoading}
         />
 
-        {/* Main content */}
         <main className="flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
             <motion.div
@@ -287,20 +217,12 @@ export default function Home() {
         </main>
       </div>
 
-      {/* Upload modal */}
       <UploadModal
-        isOpen={showUpload}
-        onClose={() => {
-          setShowUpload(false);
-          setUploadStatus("ready");
-          setUploadMessage("");
-        }}
-        onUpload={(file) => {
-          handleUpload(file);
-          // Keep modal open to show progress
-        }}
-        status={uploadStatus === "ready" ? "idle" : uploadStatus as any}
-        statusMessage={uploadMessage}
+        isOpen={upload.showModal}
+        onClose={upload.closeModal}
+        onUpload={handleUpload}
+        status={upload.status}
+        statusMessage={upload.message}
       />
     </div>
   );

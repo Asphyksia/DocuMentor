@@ -5,20 +5,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Send, Loader2, FileText, Bot, User } from "lucide-react";
 import clsx from "clsx";
 import DashboardRenderer from "../DashboardRenderer";
+import type { ChatMessage } from "../hooks/useChatState";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type ChatMessage = {
-  id: string;
-  role: "user" | "agent";
-  content: string;
-  dashboard?: any;
-  filename?: string;
-  isLoading?: boolean;
-  timestamp: number;
-};
+export type { ChatMessage };
 
 type Props = {
   messages: ChatMessage[];

@@ -12,17 +12,9 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type { DocItem } from "../hooks/useDocumentsState";
 
-export type DocItem = {
-  id: number;
-  title: string;
-  type: string;
-  status: string;
-  created_at?: string;
-};
+export type { DocItem };
 
 type Props = {
   documents: DocItem[];
@@ -36,7 +28,7 @@ type Props = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function docIcon(type: string) {
+function docIcon(type?: string) {
   const t = type?.toLowerCase() ?? "";
   if (t.includes("pdf")) return <FileText className="w-4 h-4 text-red-400" />;
   if (t.includes("sheet") || t.includes("csv") || t.includes("xls"))
