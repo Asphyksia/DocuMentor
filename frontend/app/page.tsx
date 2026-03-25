@@ -96,15 +96,17 @@ export default function Home() {
           if (p.action === "query" && p.dashboard) {
             const dashboard = p.dashboard as DashboardData;
             dash.updateDashboard(dashboard);
-            // After streaming, the agent message is already finalized with streamed text.
-            // resolveAgent attaches the dashboard to it. If still loading (no streaming),
-            // it replaces the content with the summary.
             const fallbackText =
               p.response ??
               ("summary" in dashboard ? (dashboard as { summary?: string }).summary : undefined) ??
               ("content" in dashboard ? (dashboard as { content?: string }).content : undefined) ??
               "Here are the results:";
-            chat.resolveAgent(fallbackText, dashboard);
+            // For summary-type responses, only show text in chat (no inline dashboard)
+            // to avoid duplicating the same content as text + summary card.
+            // Rich dashboards (tables, metrics) still show inline.
+            const isSummaryOnly =
+              "type" in dashboard && (dashboard as { type: string }).type === "summary";
+            chat.resolveAgent(fallbackText, isSummaryOnly ? undefined : dashboard);
           }
 
           if (p.action === "extract" && p.dashboard) {
