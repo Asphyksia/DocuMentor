@@ -96,16 +96,15 @@ export default function Home() {
           if (p.action === "query" && p.dashboard) {
             const dashboard = p.dashboard as DashboardData;
             dash.updateDashboard(dashboard);
-            // After streaming, the agent message is already finalized.
-            // resolveAgent will update it if still loading/streaming,
-            // otherwise we attach the dashboard to the last agent message.
-            chat.resolveAgent(
-              (p as Record<string, unknown>).response as string ??
+            // After streaming, the agent message is already finalized with streamed text.
+            // resolveAgent attaches the dashboard to it. If still loading (no streaming),
+            // it replaces the content with the summary.
+            const fallbackText =
+              p.response ??
               ("summary" in dashboard ? (dashboard as { summary?: string }).summary : undefined) ??
               ("content" in dashboard ? (dashboard as { content?: string }).content : undefined) ??
-              "Here are the results:",
-              dashboard,
-            );
+              "Here are the results:";
+            chat.resolveAgent(fallbackText, dashboard);
           }
 
           if (p.action === "extract" && p.dashboard) {

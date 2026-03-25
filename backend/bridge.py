@@ -223,12 +223,21 @@ def _create_agent() -> "AIAgent | None":
         return None
 
 
-# Lazy singleton — created on first query
-_agent_instance: AIAgent | None = None
+# Lazy singleton agent + query lock to prevent callback interleaving
+_agent_instance: "AIAgent | None" = None
 _agent_init_attempted = False
+_agent_query_lock: asyncio.Lock | None = None
+
+
+def _get_query_lock() -> asyncio.Lock:
+    global _agent_query_lock
+    if _agent_query_lock is None:
+        _agent_query_lock = asyncio.Lock()
+    return _agent_query_lock
 
 
 def _get_agent() -> "AIAgent | None":
+    """Get or create the singleton AIAgent."""
     global _agent_instance, _agent_init_attempted
     if not _agent_init_attempted:
         _agent_init_attempted = True
@@ -486,20 +495,22 @@ async def handle_upload(ws: WebSocket, payload: dict) -> None:
 
 def _parse_dashboard_from_text(text: str) -> dict | None:
     """Try to extract a dashboard JSON from agent response text."""
-    # Look for ```json ... ``` blocks
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    # Look for ```json ... ``` blocks (greedy between fences to capture nested {})
+    json_match = re.search(r"```(?:json)?\s*(\{.+\})\s*```", text, re.DOTALL)
     if json_match:
         try:
             return json.loads(json_match.group(1))
         except json.JSONDecodeError:
             pass
     # Try parsing the whole text as JSON
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except (json.JSONDecodeError, ValueError):
-        pass
+    text_stripped = text.strip()
+    if text_stripped.startswith("{") and text_stripped.endswith("}"):
+        try:
+            parsed = json.loads(text_stripped)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
     return None
 
 
@@ -535,7 +546,15 @@ async def handle_query(ws: WebSocket, payload: dict) -> None:
 
     # ---------------------------------------------------------------
     # Hermes Agent path — streaming + tool use
+    # Lock ensures only one query runs at a time (singleton agent
+    # has shared callback state). Concurrent queries are queued.
     # ---------------------------------------------------------------
+    async with _get_query_lock():
+        await _run_hermes_query(ws, agent, data)
+
+
+async def _run_hermes_query(ws: WebSocket, agent: "AIAgent", data: QueryPayload) -> None:
+    """Execute a query through Hermes AIAgent with streaming callbacks."""
     ws_id = id(ws)
     history = _conversation_histories.get(ws_id, [])
     loop = asyncio.get_running_loop()

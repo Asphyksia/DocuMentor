@@ -106,6 +106,7 @@ export interface ResultMessage {
     search_space_id?: number;
     query?: string;
     thread_id?: string;
+    response?: string;
     dashboard?: DashboardData;
     result?: Record<string, unknown>;
   };
