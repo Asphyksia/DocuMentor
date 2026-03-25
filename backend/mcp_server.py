@@ -663,7 +663,7 @@ _inner = Starlette(
     lifespan=lifespan,
 )
 
-app = TrailingSlashMiddleware(_inner)
+app = MCPFixupMiddleware(_inner)
 
 
 # ===========================================================================
