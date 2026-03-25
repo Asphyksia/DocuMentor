@@ -7,7 +7,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY mcp_wrapper.py .
-COPY bridge.py .
+# mcp_server.py is mounted or copied from surfsense-skill/
+# See docker-compose.yml volumes
 
-EXPOSE 8000 8001
+EXPOSE 8000
