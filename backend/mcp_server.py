@@ -623,17 +623,34 @@ async def lifespan(app):
 mcp.settings.streamable_http_path = "/"
 
 
-class TrailingSlashMiddleware:
-    """ASGI middleware: rewrite /mcp to /mcp/ so Mount sees it correctly.
-    Avoids the 307 redirect that Hermes can't follow."""
+class MCPFixupMiddleware:
+    """ASGI middleware that fixes two issues for MCP clients:
+    1. Rewrites /mcp to /mcp/ (avoids 307 redirect from Starlette Mount)
+    2. Ensures Accept header includes application/json for /mcp requests
+       (FastMCP requires it, but some clients don't send it)
+    """
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"] == "/mcp":
+        if scope["type"] == "http" and scope["path"].startswith("/mcp"):
             scope = dict(scope)
-            scope["path"] = "/mcp/"
+            # Fix trailing slash
+            if scope["path"] == "/mcp":
+                scope["path"] = "/mcp/"
+            # Ensure Accept header includes application/json
+            headers = list(scope.get("headers", []))
+            accept_found = False
+            for i, (name, value) in enumerate(headers):
+                if name == b"accept":
+                    accept_found = True
+                    if b"application/json" not in value:
+                        headers[i] = (name, value + b", application/json")
+                    break
+            if not accept_found:
+                headers.append((b"accept", b"application/json, text/event-stream"))
+            scope["headers"] = headers
         await self.app(scope, receive, send)
 
 
