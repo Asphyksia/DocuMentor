@@ -148,7 +148,9 @@ read -rp "Type 'yes' to confirm: " CONFIRM
 
 if [ "$CONFIRM" = "yes" ]; then
     cd "$(dirname "$SCRIPT_DIR")"
-    rm -rf "$SCRIPT_DIR"
+    # Docker may create root-owned files inside mounted volumes (e.g. SearXNG)
+    # so we need sudo to remove everything cleanly
+    sudo rm -rf "$SCRIPT_DIR"
     echo ""
     echo -e "  ${GREEN}✓${NC} Project files removed"
 else
