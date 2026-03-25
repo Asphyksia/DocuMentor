@@ -84,6 +84,18 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))  # 
 MCP_TIMEOUT = int(os.getenv("MCP_TIMEOUT", "120"))  # seconds
 HEALTH_TIMEOUT = 10
 
+# CORS — restrict to known frontends; override with ALLOWED_ORIGINS env var
+_default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", ",".join(_default_origins)).split(",")
+    if o.strip()
+]
+
+# Rate limiting (per WebSocket connection)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "30"))  # requests per window
+
 # Hermes Agent config
 HERMES_MODEL = os.getenv("HERMES_MODEL", "qwen/qwen3-235b-a22b")
 HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "https://openrouter.ai/api/v1")
@@ -126,6 +138,7 @@ class ErrorCode:
     MCP_UNREACHABLE = "MCP_UNREACHABLE"
     UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE"
     UPLOAD_DECODE_FAILED = "UPLOAD_DECODE_FAILED"
+    RATE_LIMITED = "RATE_LIMITED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 # ---------------------------------------------------------------------------
@@ -180,7 +193,7 @@ app = FastAPI(title="DocuMentor Bridge", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -192,6 +205,22 @@ app.add_middleware(
 
 active_connections: set[WebSocket] = set()
 _conversation_histories: dict[int, list[dict[str, Any]]] = {}
+
+# Per-connection rate limiter: {ws_id: [timestamp, ...]}
+_rate_buckets: dict[int, list[float]] = {}
+
+
+def _check_rate_limit(ws_id: int) -> bool:
+    """Return True if within rate limit, False if exceeded."""
+    now = time.monotonic()
+    bucket = _rate_buckets.setdefault(ws_id, [])
+    # Prune old entries
+    cutoff = now - RATE_LIMIT_WINDOW
+    bucket[:] = [t for t in bucket if t > cutoff]
+    if len(bucket) >= RATE_LIMIT_MAX:
+        return False
+    bucket.append(now)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +832,14 @@ async def websocket_endpoint(ws: WebSocket):
                 await send_error(ws, ErrorCode.UNKNOWN_TYPE, f"Unknown message type: {msg_type}")
                 continue
 
+            # Rate limiting (skip for status/clear — low-cost operations)
+            if msg_type not in ("status", "clear") and not _check_rate_limit(id(ws)):
+                await send_error(
+                    ws, ErrorCode.RATE_LIMITED,
+                    f"Rate limit exceeded ({RATE_LIMIT_MAX} requests per {RATE_LIMIT_WINDOW}s). Please slow down."
+                )
+                continue
+
             # Validate & dispatch
             try:
                 asyncio.create_task(_safe_handle(handler, ws, payload, msg_type))
@@ -815,8 +852,10 @@ async def websocket_endpoint(ws: WebSocket):
     except Exception:
         logger.exception("WebSocket error")
     finally:
+        ws_id = id(ws)
         active_connections.discard(ws)
-        _conversation_histories.pop(id(ws), None)
+        _conversation_histories.pop(ws_id, None)
+        _rate_buckets.pop(ws_id, None)
         logger.info("Client disconnected (%d remaining)", len(active_connections))
 
 
@@ -850,9 +889,11 @@ async def health():
     return {
         "status": "ok",
         "service": "documenter-bridge",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "clients": len(active_connections),
         "hermes": _hermes_available,
+        "cors_origins": ALLOWED_ORIGINS,
+        "rate_limit": f"{RATE_LIMIT_MAX}/{RATE_LIMIT_WINDOW}s",
     }
 
 # ---------------------------------------------------------------------------
@@ -871,7 +912,9 @@ async def shutdown():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info("Starting DocuMentor Bridge v0.3.0 on port %s", BRIDGE_PORT)
+    logger.info("Starting DocuMentor Bridge v0.4.0 on port %s", BRIDGE_PORT)
+    logger.info("CORS origins: %s", ALLOWED_ORIGINS)
+    logger.info("Rate limit: %d requests per %ds window", RATE_LIMIT_MAX, RATE_LIMIT_WINDOW)
     logger.info("MCP wrapper: %s", MCP_BASE)
     logger.info("Max upload: %d MB", MAX_UPLOAD_BYTES // (1024 * 1024))
     uvicorn.run(app, host="0.0.0.0", port=BRIDGE_PORT, log_level="info")
