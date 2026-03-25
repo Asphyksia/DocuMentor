@@ -620,9 +620,11 @@ async def lifespan(app):
 
 app = Starlette(
     routes=[
-        Mount("/", app=mcp.streamable_http_app()),   # /mcp for Hermes (Streamable HTTP)
+        # Specific routes FIRST (before the catch-all mount)
         Route("/jsonrpc", jsonrpc_handler, methods=["POST"]),  # for bridge
         Route("/health", health_handler, methods=["GET"]),
+        # FastMCP catch-all LAST — serves /mcp (Streamable HTTP for Hermes)
+        Mount("/", app=mcp.streamable_http_app()),
     ],
     lifespan=lifespan,
 )
