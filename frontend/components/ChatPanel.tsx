@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Loader2, FileText, Bot, User } from "lucide-react";
+import { Send, Loader2, Bot, User, Plus } from "lucide-react";
 import clsx from "clsx";
 import DashboardRenderer from "../DashboardRenderer";
 import type { ChatMessage } from "../hooks/useChatState";
@@ -14,8 +14,24 @@ type Props = {
   input: string;
   onInputChange: (val: string) => void;
   onSend: () => void;
+  onClearHistory?: () => void;
   isQuerying: boolean;
+  agentStatus?: string | null;
 };
+
+// ---------------------------------------------------------------------------
+// Streaming cursor
+// ---------------------------------------------------------------------------
+
+function StreamingCursor() {
+  return (
+    <motion.span
+      className="inline-block w-0.5 h-4 bg-blue-400 ml-0.5 align-text-bottom"
+      animate={{ opacity: [1, 0] }}
+      transition={{ repeat: Infinity, duration: 0.8, ease: "steps(2)" }}
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Message bubble
@@ -73,12 +89,15 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
               />
             </div>
           ) : (
-            msg.content
+            <span className="whitespace-pre-wrap">
+              {msg.content}
+              {msg.isStreaming && <StreamingCursor />}
+            </span>
           )}
         </motion.div>
 
         {/* Inline dashboard */}
-        {msg.dashboard && !msg.isLoading && (
+        {msg.dashboard && !msg.isLoading && !msg.isStreaming && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -112,7 +131,9 @@ export default function ChatPanel({
   input,
   onInputChange,
   onSend,
+  onClearHistory,
   isQuerying,
+  agentStatus,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -139,9 +160,43 @@ export default function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
+      {/* Agent status indicator */}
+      {agentStatus && (
+        <div className="px-4 pb-1">
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="flex items-center gap-2 text-xs text-gray-400"
+          >
+            <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+            <span>{agentStatus}</span>
+          </motion.div>
+        </div>
+      )}
+
       {/* Input */}
       <div className="p-4 border-t border-gray-800">
         <div className="flex gap-3 items-end">
+          {/* New chat button */}
+          {onClearHistory && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onClearHistory}
+              disabled={isQuerying}
+              title="New chat"
+              className={clsx(
+                "p-3 rounded-xl transition-all duration-200",
+                isQuerying
+                  ? "bg-gray-800 text-gray-600 cursor-not-allowed"
+                  : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
+              )}
+            >
+              <Plus className="w-5 h-5" />
+            </motion.button>
+          )}
+
           <div className="flex-1 relative">
             <textarea
               value={input}

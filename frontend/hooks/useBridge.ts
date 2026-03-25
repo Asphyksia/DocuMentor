@@ -228,6 +228,10 @@ export function useBridge() {
     [send],
   );
 
+  const clearHistory = useCallback(() => {
+    send({ type: "clear" });
+  }, [send]);
+
   return {
     bridgeState,
     systemStatus,
@@ -242,5 +246,6 @@ export function useBridge() {
     deleteDocument,
     deleteSpace,
     searchDocuments,
+    clearHistory,
   };
 }

@@ -36,6 +36,7 @@ export default function Home() {
   const upload = useUploadState();
 
   const [activeTab, setActiveTab] = useState<TabId>("chat");
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
 
   // --- Bridge message dispatcher ---
   useEffect(() => {
@@ -46,6 +47,36 @@ export default function Home() {
           if (msg.payload.state === "ready") {
             chat.setIsQuerying(false);
           }
+          break;
+
+        case "stream": {
+          const { delta, done } = msg.payload;
+          if (delta) {
+            chat.appendStreamDelta(delta);
+          }
+          if (done) {
+            // Finalize and try to parse dashboard from accumulated text
+            chat.finalizeStream();
+            setAgentStatus(null);
+          }
+          break;
+        }
+
+        case "agent_status": {
+          const { tool, status, preview } = msg.payload;
+          if (status === "running") {
+            const label = preview ? `${tool}: ${preview}` : tool;
+            setAgentStatus(`Using ${label}…`);
+          } else if (status === "complete") {
+            setAgentStatus(null);
+          } else if (status === "error") {
+            setAgentStatus(null);
+          }
+          break;
+        }
+
+        case "thinking":
+          // Phase 1: ignore thinking messages (optional debug)
           break;
 
         case "result": {
@@ -65,11 +96,16 @@ export default function Home() {
           if (p.action === "query" && p.dashboard) {
             const dashboard = p.dashboard as DashboardData;
             dash.updateDashboard(dashboard);
-            const summary =
+            // After streaming, the agent message is already finalized.
+            // resolveAgent will update it if still loading/streaming,
+            // otherwise we attach the dashboard to the last agent message.
+            chat.resolveAgent(
+              (p as Record<string, unknown>).response as string ??
               ("summary" in dashboard ? (dashboard as { summary?: string }).summary : undefined) ??
               ("content" in dashboard ? (dashboard as { content?: string }).content : undefined) ??
-              "Here are the results:";
-            chat.resolveAgent(summary, dashboard);
+              "Here are the results:",
+              dashboard,
+            );
           }
 
           if (p.action === "extract" && p.dashboard) {
@@ -92,6 +128,7 @@ export default function Home() {
 
         case "error":
           chat.resolveAgentError(msg.payload.message);
+          setAgentStatus(null);
           break;
       }
     });
@@ -131,6 +168,13 @@ export default function Home() {
     bridge.query(text, docs.activeSpaceId);
   }, [bridge, chat, docs.activeSpaceId]);
 
+  // --- Clear history handler ---
+  const handleClearHistory = useCallback(() => {
+    chat.clearHistory();
+    setAgentStatus(null);
+    bridge.clearHistory();
+  }, [chat, bridge]);
+
   // --- Doc selection ---
   const handleSelectDoc = useCallback(
     (doc: DocItem) => {
@@ -150,7 +194,9 @@ export default function Home() {
             input={chat.input}
             onInputChange={chat.setInput}
             onSend={handleSend}
+            onClearHistory={handleClearHistory}
             isQuerying={chat.isQuerying}
+            agentStatus={agentStatus}
           />
         );
       case "dashboard":

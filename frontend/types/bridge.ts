@@ -22,7 +22,8 @@ export type OutboundMessage =
   | { type: "extract"; payload: ExtractPayload }
   | { type: "delete_document"; payload: DeleteDocumentPayload }
   | { type: "delete_space"; payload: DeleteSpacePayload }
-  | { type: "search_documents"; payload: SearchDocumentsPayload };
+  | { type: "search_documents"; payload: SearchDocumentsPayload }
+  | { type: "clear" };
 
 export interface QueryPayload {
   query: string;
@@ -74,7 +75,10 @@ export type InboundMessage =
   | DocumentsMessage
   | SpacesMessage
   | SpaceCreatedMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | StreamMessage
+  | AgentStatusMessage
+  | ThinkingMessage;
 
 export interface StatusMessage {
   type: "status";
@@ -155,6 +159,33 @@ export interface ErrorMessage {
     code?: string;
     message: string;
     tool?: string;
+  };
+}
+
+// Streaming text token from Hermes
+export interface StreamMessage {
+  type: "stream";
+  payload: {
+    delta: string;
+    done?: boolean;
+  };
+}
+
+// Agent tool execution status
+export interface AgentStatusMessage {
+  type: "agent_status";
+  payload: {
+    tool: string;
+    status: "running" | "complete" | "error";
+    preview?: string;
+  };
+}
+
+// Agent thinking/reasoning (optional debug)
+export interface ThinkingMessage {
+  type: "thinking";
+  payload: {
+    text: string;
   };
 }
 
