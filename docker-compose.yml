@@ -51,21 +51,37 @@ services:
 
   # ----------------------------------------------------------------------------
   # DocuMentor Bridge
-  # WebSocket server — single communication layer between dashboard and MCP
+  # WebSocket server — intelligent gateway between dashboard and Hermes/MCP
+  #
+  # The bridge imports Hermes AIAgent for query routing. When HERMES_API_KEY
+  # is set, queries go through Hermes (reasoning + tool use). Otherwise falls
+  # back to direct MCP calls.
+  #
+  # NOTE: For Hermes integration, the bridge needs access to hermes-agent source
+  # and its config. If running in Docker, mount the hermes-agent dir and config.
+  # For development, run the bridge outside Docker:
+  #   cd backend && python bridge.py
   # ----------------------------------------------------------------------------
   bridge:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.bridge
     command: python bridge.py
     volumes:
       - upload-tmp:/tmp/documenter-uploads
+      - ./hermes-agent:/app/hermes-agent:ro
+      - ${HERMES_HOME:-~/.hermes}:/root/.hermes:ro
     ports:
       - "${BRIDGE_PORT:-8001}:8001"
     env_file: .env
     environment:
       MCP_URL: http://mcp-wrapper:8000
       BRIDGE_PORT: "8001"
+      HERMES_AGENT_DIR: /app/hermes-agent
+      HERMES_HOME: /root/.hermes
+      HERMES_MODEL: ${HERMES_MODEL:-}
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
     depends_on:
       mcp-wrapper:
         condition: service_healthy

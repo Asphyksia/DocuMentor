@@ -1,0 +1,12 @@
+# Hermes Agent config for DocuMentor
+# Copy to ~/.hermes/config.yaml (or wherever HERMES_HOME points)
+#
+# This configures Hermes to discover the DocuMentor MCP tools
+# so AIAgent can use them for document queries.
+
+mcp_servers:
+  surfsense:
+    url: "http://localhost:8000/mcp/"
+    timeout: 120
+    connect_timeout: 60
+    # In Docker, use: http://mcp-wrapper:8000/mcp/
