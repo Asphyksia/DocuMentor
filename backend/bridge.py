@@ -106,7 +106,7 @@ Be concise but thorough. If you don't find relevant information, say so honestly
 """
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("bridge")
@@ -286,7 +286,19 @@ async def mcp_call(tool: str, args: dict) -> dict:
         raise MCPError("Empty response from MCP tool")
 
     text = content_list[0].get("text", "{}")
-    return json.loads(text)
+    logger.debug("mcp_call %s raw text (first 500 chars): %r", tool, text[:500])
+
+    # Handle cases where FastMCP wraps the result differently
+    if not text or text.isspace():
+        raise MCPError(f"Empty text response from {tool}")
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        # If the text is not JSON, maybe it's a plain string result
+        logger.error("mcp_call %s: json.loads failed on: %r (error: %s)", tool, text[:200], e)
+        # Return as a wrapped dict so callers don't break
+        return {"type": "raw", "content": text}
 
 
 class MCPError(Exception):
