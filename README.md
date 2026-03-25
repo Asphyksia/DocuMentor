@@ -35,9 +35,9 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
 - Optionally routes queries through [Hermes Agent](https://github.com/NousResearch/hermes-agent) for intelligent reasoning and multi-step tool use
 
 **What it doesn't do (yet):**
-- Multi-user auth / RBAC — it's single-user for now
+- Multi-user auth / RBAC — it's single-user for now (auth planned)
 - Offline queries — requires a live LLM provider
-- Production hardening — functional for demos and evaluation
+- Production hardening — functional for demos and evaluation (CORS and rate limiting added in v0.4.0)
 
 > DocuMentor orchestrates existing open-source tools (SurfSense for RAG, Docling for parsing, pgvector for search). Its value is the unified UI, the MCP tool layer, the bridge server, and the guided setup. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
 
@@ -195,6 +195,8 @@ All variables from `.env.example`:
 | `HERMES_BASE_URL` | — | `https://openrouter.ai/api/v1` | Hermes LLM endpoint |
 | `HERMES_MODEL` | — | `qwen/qwen3-235b-a22b` | Model for Hermes Agent |
 | `HERMES_MAX_ITERATIONS` | — | `20` | Max tool-calling rounds per query |
+| `ALLOWED_ORIGINS` | — | `http://localhost:3000,http://127.0.0.1:3000` | CORS allowed origins (comma-separated) |
+| `RATE_LIMIT_MAX` | — | `30` | Max requests per 60s per WebSocket connection |
 | `NEXT_PUBLIC_BRIDGE_URL` | — | `ws://localhost:8001/ws` | Bridge WebSocket URL for frontend |
 | `NEXT_PUBLIC_DEFAULT_SPACE_ID` | — | `1` | Default document space ID |
 
@@ -216,8 +218,8 @@ python bridge.py
 ### MCP Wrapper
 
 ```bash
-cd backend
-pip install -r requirements.txt
+cd surfsense-skill
+pip install -r requirements.txt  # if separate from backend
 python mcp_server.py
 # Runs on http://localhost:8000
 ```
@@ -254,12 +256,13 @@ DocuMentor/
 ├── hermes-config.example.yaml     # Hermes MCP config template
 │
 ├── backend/
-│   ├── bridge.py                  # WebSocket gateway (10 handlers)
-│   ├── mcp_server.py              # MCP server (25 tools)
-│   ├── documenter/                # Shared modules (client, errors)
-│   ├── Dockerfile                 # MCP wrapper container
+│   ├── bridge.py                  # WebSocket gateway v0.4.0 (10 handlers, CORS, rate limiting)
 │   ├── Dockerfile.bridge          # Bridge container
+│   ├── Dockerfile.mcp             # MCP wrapper container
 │   └── requirements.txt
+│
+├── surfsense-skill/               # Git submodule — MCP tools (single source of truth)
+│   └── mcp_server.py              # MCP server v0.4.0 (25 tools, dual protocol)
 │
 ├── frontend/
 │   ├── app/                       # Next.js pages and layout
@@ -269,8 +272,7 @@ DocuMentor/
 │   └── lib/utils.ts
 │
 ├── hermes-agent/                  # Git submodule — Nous Research
-├── SurfSense/                     # Git submodule — MODSetter
-├── surfsense-skill/               # Git submodule — MCP tools
+├── docs/                          # Audit reports and improvement plans
 │
 ├── ARCHITECTURE.md                # Technical deep-dive
 ├── DOCSTEMPLATES.md               # Dashboard JSON schemas

@@ -1,8 +1,0 @@
-# Hermes config snippet for DocuMentor MCP
-# Merge this into ~/.hermes/config.yaml
-
-mcp_servers:
-  documenter:
-    url: "http://localhost:8000/mcp"
-    timeout: 120
-    connect_timeout: 30

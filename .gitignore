@@ -16,6 +16,7 @@ node_modules/
 .next/
 out/
 dist/
+package-lock.json
 
 # Logs
 *.log
@@ -25,7 +26,18 @@ backend/mcp.log
 .DS_Store
 Thumbs.db
 
+# IDE
+.cursor/
+.vscode/
+.idea/
+
 # Docker volumes (data stays local)
 postgres_data/
 redis_data/
-memory/
+
+# SurfSense source (pulled as Docker image, not needed in repo)
+SurfSense/
+
+# Temporary files
+*.tmp
+*.bak
