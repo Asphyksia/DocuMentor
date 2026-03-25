@@ -29,6 +29,5 @@ RUN pip install --no-cache-dir \
     "mcp[cli]>=1.0.0"
 
 COPY bridge.py .
-COPY mcp_server.py .
 
 EXPOSE 8001
