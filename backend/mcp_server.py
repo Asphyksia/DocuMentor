@@ -618,13 +618,14 @@ async def lifespan(app):
         await _http.aclose()
 
 
+# Configure FastMCP to serve at root of its mount (not /mcp under /mcp)
+mcp.settings.streamable_http_path = "/"
+
 app = Starlette(
     routes=[
-        # Specific routes FIRST (before the catch-all mount)
         Route("/jsonrpc", jsonrpc_handler, methods=["POST"]),  # for bridge
         Route("/health", health_handler, methods=["GET"]),
-        # FastMCP catch-all LAST — serves /mcp (Streamable HTTP for Hermes)
-        Mount("/", app=mcp.streamable_http_app()),
+        Mount("/mcp", app=mcp.streamable_http_app()),  # Hermes connects to /mcp
     ],
     lifespan=lifespan,
 )
