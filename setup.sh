@@ -22,13 +22,14 @@ cd "$SCRIPT_DIR"
 clear
 echo ""
 echo -e "${BOLD}Welcome to DocuMentor${NC}"
-echo -e "Agentic document intelligence platform"
+echo -e "Intelligent document analysis platform"
 echo ""
 echo "This script will:"
-echo "  1. Configure your API key and credentials"
-echo "  2. Install Hermes Agent"
-echo "  3. Start all services (SurfSense + MCP wrapper)"
-echo "  4. Launch the dashboard"
+echo "  1. Check requirements"
+echo "  2. Configure your API key and credentials"
+echo "  3. Install Hermes Agent (optional)"
+echo "  4. Start all services (SurfSense + MCP + Bridge)"
+echo "  5. Install and launch the dashboard"
 echo ""
 read -p "Press Enter to continue..."
 echo ""
@@ -41,12 +42,14 @@ echo -e "${CYAN}Checking requirements...${NC}"
 
 ERRORS=0
 
-# Git submodules (must be first — everything depends on these)
-if [ ! -f "$SCRIPT_DIR/SurfSense/docker/docker-compose.yml" ] || [ ! -d "$SCRIPT_DIR/hermes-agent" ] || [ -z "$(ls -A "$SCRIPT_DIR/SurfSense" 2>/dev/null)" ]; then
-    echo -e "  ${YELLOW}↻${NC} Downloading submodules (SurfSense + Hermes Agent)..."
+# Git submodules
+if [ ! -f "$SCRIPT_DIR/SurfSense/docker/docker-compose.yml" ] || \
+   [ ! -f "$SCRIPT_DIR/surfsense-skill/mcp_server.py" ] || \
+   [ -z "$(ls -A "$SCRIPT_DIR/SurfSense" 2>/dev/null)" ]; then
+    echo -e "  ${YELLOW}↻${NC} Downloading submodules..."
     git submodule update --init --recursive --force
     if [ ! -f "$SCRIPT_DIR/SurfSense/docker/docker-compose.yml" ]; then
-        echo -e "  ${RED}✗${NC} Failed to download SurfSense submodule"
+        echo -e "  ${RED}✗${NC} Failed to download submodules"
         echo "    Try manually: git submodule update --init --recursive"
         ERRORS=$((ERRORS + 1))
     else
@@ -59,11 +62,11 @@ fi
 # Docker
 if ! command -v docker &> /dev/null; then
     echo -e "  ${RED}✗${NC} Docker not found"
-    echo "    Install Docker Desktop from: https://www.docker.com/products/docker-desktop/"
+    echo "    Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
     ERRORS=$((ERRORS + 1))
 else
     if ! docker info &> /dev/null; then
-        echo -e "  ${RED}✗${NC} Docker is not running — please start Docker Desktop"
+        echo -e "  ${RED}✗${NC} Docker is not running"
         ERRORS=$((ERRORS + 1))
     else
         echo -e "  ${GREEN}✓${NC} Docker"
@@ -83,7 +86,6 @@ fi
 # Python
 if ! command -v python3 &> /dev/null; then
     echo -e "  ${RED}✗${NC} Python 3 not found"
-    echo "    Install from: https://python.org"
     ERRORS=$((ERRORS + 1))
 else
     PYTHON_VERSION=$(python3 --version)
@@ -99,7 +101,7 @@ else
 fi
 
 # Port checks
-for PORT in 8000 8929 3000; do
+for PORT in 8000 8001 8929 3000; do
     if lsof -i :$PORT &> /dev/null 2>&1; then
         echo -e "  ${YELLOW}⚠${NC}  Port $PORT is in use — may cause conflicts"
     fi
@@ -114,7 +116,7 @@ fi
 echo ""
 
 # ==============================================================================
-# Step 1 — Collect credentials (only what's needed)
+# Step 1 — Collect credentials
 # ==============================================================================
 
 echo -e "${BOLD}Configuration${NC}"
@@ -138,8 +140,8 @@ done
 
 echo ""
 
-# Password for SurfSense
-echo -e "Choose a ${CYAN}password${NC} for your document vault (SurfSense)."
+# SurfSense password
+echo -e "Choose a ${CYAN}password${NC} for your document vault."
 while true; do
     read -rsp "  Password (min 8 characters): " VAULT_PASSWORD
     echo ""
@@ -147,7 +149,7 @@ while true; do
         echo -e "  ${GREEN}✓${NC} Password set"
         break
     else
-        echo -e "  ${RED}✗${NC} Password too short — minimum 8 characters"
+        echo -e "  ${RED}✗${NC} Password too short"
     fi
 done
 
@@ -173,152 +175,169 @@ esac
 echo -e "  ${GREEN}✓${NC} Model: $LLM_MODEL"
 echo ""
 
+# Hermes (optional)
+echo -e "Do you want to enable ${CYAN}Hermes Agent${NC}? (intelligent query routing)"
+echo "  With Hermes: AI reasons about your question and decides which tools to use"
+echo "  Without: queries go directly to the search engine (faster, less intelligent)"
+echo ""
+read -rp "  Enable Hermes? [Y/n]: " ENABLE_HERMES
+echo ""
+
+HERMES_ENABLED=true
+if [[ "$ENABLE_HERMES" =~ ^[Nn]$ ]]; then
+    HERMES_ENABLED=false
+    echo -e "  ${GREEN}✓${NC} Hermes disabled — using direct queries"
+else
+    echo -e "  ${GREEN}✓${NC} Hermes enabled"
+fi
+
+echo ""
+
 # ==============================================================================
 # Step 2 — Generate .env
 # ==============================================================================
 
 echo -e "${CYAN}Generating configuration...${NC}"
 
-# Generate a random SECRET_KEY
 SECRET_KEY=$(openssl rand -base64 32 2>/dev/null || python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
+HERMES_SECTION=""
+if [ "$HERMES_ENABLED" = true ]; then
+    HERMES_SECTION="
+# Hermes Agent (intelligent query routing)
+HERMES_API_KEY=${API_KEY}
+HERMES_BASE_URL=https://relay.opengpu.network/v2/openai/v1
+HERMES_MODEL=${LLM_MODEL}
+HERMES_MAX_ITERATIONS=20"
+fi
 
 cat > "$SCRIPT_DIR/.env" << EOF
 # DocuMentor Configuration
 # Generated by setup.sh on $(date)
-# To change the model, edit LLM_MODEL_NAME and restart with: docker compose restart
 
 # RelayGPU
 OPENAI_API_KEY=${API_KEY}
 OPENAI_BASE_URL=https://relay.opengpu.network/v2/openai/v1
 LLM_MODEL_NAME=${LLM_MODEL}
 
-# SurfSense
+# SurfSense core
 SECRET_KEY=${SECRET_KEY}
 ETL_SERVICE=DOCLING
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 AUTH_TYPE=LOCAL
 
-# MCP Wrapper (inside Docker, backend is reachable as http://backend:8000)
+# MCP Wrapper
 SURFSENSE_BASE_URL=http://backend:8000
 SURFSENSE_EMAIL=admin@documenter.app
 SURFSENSE_PASSWORD=${VAULT_PASSWORD}
 MCP_PORT=8000
 
+# Bridge
+BRIDGE_PORT=8001
+${HERMES_SECTION}
+
 # Dashboard
-NEXT_PUBLIC_MCP_URL=http://localhost:8000
+NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8001/ws
 NEXT_PUBLIC_DEFAULT_SPACE_ID=1
 EOF
 
 # SurfSense needs its own .env in its docker directory
-# Create a symlink so both point to the same config
-ln -sf "$SCRIPT_DIR/.env" "$SCRIPT_DIR/SurfSense/docker/.env"
+ln -sf "$SCRIPT_DIR/.env" "$SCRIPT_DIR/SurfSense/docker/.env" 2>/dev/null || \
+    cp "$SCRIPT_DIR/.env" "$SCRIPT_DIR/SurfSense/docker/.env"
 
 echo -e "  ${GREEN}✓${NC} .env created"
 echo ""
 
 # ==============================================================================
-# Step 3 — Install Hermes Agent
+# Step 3 — Install Hermes Agent (optional)
 # ==============================================================================
 
-echo -e "${CYAN}Installing Hermes Agent...${NC}"
+if [ "$HERMES_ENABLED" = true ]; then
+    echo -e "${CYAN}Installing Hermes Agent...${NC}"
 
-HERMES_DIR="$SCRIPT_DIR/hermes-agent"
-HERMES_VENV="$HERMES_DIR/venv"
-HERMES_BIN="$HERMES_VENV/bin/hermes"
+    HERMES_DIR="$SCRIPT_DIR/hermes-agent"
+    HERMES_VENV="$HERMES_DIR/venv"
+    HERMES_BIN="$HERMES_VENV/bin/hermes"
 
-if [ -x "$HERMES_BIN" ]; then
-    echo -e "  ${GREEN}✓${NC} Hermes already installed"
-elif [ ! -d "$HERMES_DIR" ] || [ ! -f "$HERMES_DIR/pyproject.toml" ]; then
-    echo -e "  ${RED}✗${NC} hermes-agent submodule not found"
-    echo "    Run: git submodule update --init --recursive"
-    exit 1
-else
-    # --- Find a working Python 3.11+ ---
-    PYTHON_CMD=""
-    for candidate in python3.11 python3.12 python3.13 python3; do
-        if command -v "$candidate" &> /dev/null; then
-            PY_VER=$($candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-            PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
-            PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
-            if [ "$PY_MAJOR" = "3" ] && [ "$PY_MINOR" -ge 11 ]; then
-                PYTHON_CMD="$candidate"
-                echo -e "  ${GREEN}✓${NC} Python $PY_VER found ($candidate)"
-                break
+    if [ -x "$HERMES_BIN" ]; then
+        echo -e "  ${GREEN}✓${NC} Hermes already installed"
+    elif [ ! -d "$HERMES_DIR" ] || [ ! -f "$HERMES_DIR/pyproject.toml" ]; then
+        echo -e "  ${RED}✗${NC} hermes-agent submodule not found"
+        echo "    Run: git submodule update --init --recursive"
+        exit 1
+    else
+        # Find Python 3.11+
+        PYTHON_CMD=""
+        for candidate in python3.11 python3.12 python3.13 python3; do
+            if command -v "$candidate" &> /dev/null; then
+                PY_VER=$($candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
+                PY_MAJOR=$(echo "$PY_VER" | cut -d. -f1)
+                PY_MINOR=$(echo "$PY_VER" | cut -d. -f2)
+                if [ "$PY_MAJOR" = "3" ] && [ "$PY_MINOR" -ge 11 ]; then
+                    PYTHON_CMD="$candidate"
+                    echo -e "  ${GREEN}✓${NC} Python $PY_VER found"
+                    break
+                fi
             fi
+        done
+
+        if [ -z "$PYTHON_CMD" ]; then
+            echo -e "  ${RED}✗${NC} Python 3.11+ not found"
+            exit 1
         fi
-    done
 
-    if [ -z "$PYTHON_CMD" ]; then
-        echo -e "  ${RED}✗${NC} Python 3.11+ not found"
-        echo "    Install Python 3.11 or later: https://python.org"
-        exit 1
+        echo -e "  ${CYAN}↻${NC} Creating virtual environment..."
+        rm -rf "$HERMES_VENV"
+        $PYTHON_CMD -m venv "$HERMES_VENV"
+
+        "$HERMES_VENV/bin/pip" install --quiet --upgrade pip
+        "$HERMES_VENV/bin/pip" install --quiet "setuptools>=61,<82" wheel
+
+        # Pin litellm to safe version
+        "$HERMES_VENV/bin/pip" install --quiet "litellm>=1.75.5,<1.82.7" || true
+
+        echo -e "  ${CYAN}↻${NC} Installing Hermes (this may take a minute)..."
+        cd "$HERMES_DIR"
+        "$HERMES_VENV/bin/pip" install -e "." 2>&1 || {
+            echo -e "  ${RED}✗${NC} Hermes installation failed"
+            exit 1
+        }
+
+        # Install MCP support (required for HTTP MCP servers)
+        "$HERMES_VENV/bin/pip" install --quiet "mcp[cli]>=1.0.0" || true
+
+        # Install mini-swe-agent if present
+        if [ -f "mini-swe-agent/pyproject.toml" ]; then
+            "$HERMES_VENV/bin/pip" install --quiet -e "./mini-swe-agent" 2>/dev/null || true
+        fi
+
+        cd "$SCRIPT_DIR"
+
+        if [ -x "$HERMES_BIN" ]; then
+            echo -e "  ${GREEN}✓${NC} Hermes installed"
+        else
+            echo -e "  ${RED}✗${NC} Hermes binary not found after install"
+            exit 1
+        fi
+
+        # Symlink
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes"
+        export PATH="$HOME/.local/bin:$PATH"
+        echo -e "  ${GREEN}✓${NC} hermes command available"
     fi
 
-    # --- Create venv ---
-    echo -e "  ${CYAN}↻${NC} Creating virtual environment..."
-    rm -rf "$HERMES_VENV"
-    $PYTHON_CMD -m venv "$HERMES_VENV"
-
-    if [ ! -f "$HERMES_VENV/bin/pip" ]; then
-        echo -e "  ${RED}✗${NC} Failed to create virtual environment (pip not found)"
-        echo "    Install python3-venv: sudo apt install python3-venv"
-        exit 1
-    fi
-
-    # --- Upgrade pip + pin setuptools to avoid broken wheels ---
-    "$HERMES_VENV/bin/pip" install --quiet --upgrade pip
-    "$HERMES_VENV/bin/pip" install --quiet "setuptools>=61,<82" wheel
-
-    # --- Pin litellm to safe version (1.82.8 is compromised — supply chain attack) ---
-    # See: https://github.com/BerriAI/litellm/issues/24512
-    # See: https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/
-    "$HERMES_VENV/bin/pip" install --quiet "litellm>=1.75.5,<1.82.7" || {
-        echo -e "  ${YELLOW}⚠${NC}  litellm not available on PyPI (may be quarantined)"
-        echo "    Hermes will still install but LLM routing may be limited"
-    }
-
-    # --- Install Hermes ---
-    echo -e "  ${CYAN}↻${NC} Installing dependencies (this may take a minute)..."
-    cd "$HERMES_DIR"
-
-    if ! "$HERMES_VENV/bin/pip" install -e "." 2>&1; then
-        echo ""
-        echo -e "  ${RED}✗${NC} Hermes installation failed"
-        echo "    Check the output above for details"
-        exit 1
-    fi
-
-    # --- Install optional submodules (non-blocking) ---
-    if [ -f "mini-swe-agent/pyproject.toml" ]; then
-        "$HERMES_VENV/bin/pip" install --quiet -e "./mini-swe-agent" 2>/dev/null || true
-    fi
-
-    cd "$SCRIPT_DIR"
-
-    # --- Verify ---
-    if [ ! -x "$HERMES_BIN" ]; then
-        echo -e "  ${RED}✗${NC} Hermes binary not found after install"
-        exit 1
-    fi
-
-    echo -e "  ${GREEN}✓${NC} Hermes installed"
-
-    # --- Symlink to PATH ---
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$HERMES_BIN" "$HOME/.local/bin/hermes"
-    export PATH="$HOME/.local/bin:$PATH"
-    echo -e "  ${GREEN}✓${NC} hermes command available"
-
-    # --- Configure Hermes MCP connection ---
+    # Configure Hermes MCP connection
     HERMES_CONFIG_DIR="${HERMES_HOME:-$HOME/.hermes}"
     HERMES_CONFIG="$HERMES_CONFIG_DIR/config.yaml"
     mkdir -p "$HERMES_CONFIG_DIR"
 
     if [ ! -f "$HERMES_CONFIG" ]; then
         cat > "$HERMES_CONFIG" << 'HERMESCONF'
+# DocuMentor MCP server configuration
 mcp_servers:
   surfsense:
-    url: "http://localhost:8000/mcp"
+    url: "http://localhost:8000/mcp/"
     timeout: 120
     connect_timeout: 30
 HERMESCONF
@@ -326,24 +345,23 @@ HERMESCONF
     else
         echo -e "  ${GREEN}✓${NC} Hermes config exists"
     fi
-fi
 
-echo ""
+    echo ""
+fi
 
 # ==============================================================================
 # Step 4 — Start Docker services
 # ==============================================================================
 
-echo -e "${CYAN}Starting services (this may take a few minutes on first run)...${NC}"
-echo "  Downloading Docker images..."
+echo -e "${CYAN}Starting services...${NC}"
 echo ""
 
-docker compose up -d
+docker compose up -d --build
 
 echo ""
 echo -e "  Waiting for SurfSense to be ready..."
 
-# Poll health endpoint up to 3 minutes
+# Poll health endpoint (max 3 minutes)
 MAX_WAIT=180
 WAITED=0
 while [ $WAITED -lt $MAX_WAIT ]; do
@@ -353,61 +371,70 @@ while [ $WAITED -lt $MAX_WAIT ]; do
     fi
     sleep 5
     WAITED=$((WAITED + 5))
-    echo -ne "  Waiting... (${WAITED}s / ${MAX_WAIT}s)\r"
+    printf "  Waiting... (%ds / %ds)\r" $WAITED $MAX_WAIT
 done
 
 if [ $WAITED -ge $MAX_WAIT ]; then
     echo -e "  ${YELLOW}⚠${NC}  SurfSense is taking longer than expected"
-    echo "    Check logs with: docker compose logs backend"
+    echo "    Check: docker compose logs backend"
 fi
 
-# Register the admin user in SurfSense (idempotent — ignores if exists)
-REGISTER_BODY="{\"email\":\"${SURFSENSE_EMAIL:-admin@documenter.app}\",\"password\":\"${VAULT_PASSWORD}\"}"
+# Register admin user (idempotent)
+SURFSENSE_EMAIL="admin@documenter.app"
+REGISTER_BODY="{\"email\":\"${SURFSENSE_EMAIL}\",\"password\":\"${VAULT_PASSWORD}\"}"
 REGISTER_RESP=$(curl -sf -X POST http://localhost:8929/auth/register \
     -H "Content-Type: application/json" \
     -d "$REGISTER_BODY" 2>/dev/null || true)
 
 if echo "$REGISTER_RESP" | grep -q '"id"'; then
     echo -e "  ${GREEN}✓${NC} Admin user registered"
-elif echo "$REGISTER_RESP" | grep -q 'REGISTER_USER_ALREADY_EXISTS'; then
+elif echo "$REGISTER_RESP" | grep -q 'ALREADY_EXISTS'; then
     echo -e "  ${GREEN}✓${NC} Admin user already exists"
 else
-    echo -e "  ${YELLOW}⚠${NC}  Could not register admin user — you may need to register manually"
-    echo "    Visit http://localhost:3929 to create an account"
+    echo -e "  ${YELLOW}⚠${NC}  Could not register admin user"
 fi
 
 # Check MCP wrapper
+sleep 3
 if curl -sf http://localhost:8000/health &> /dev/null; then
     echo -e "  ${GREEN}✓${NC} MCP wrapper is ready"
 else
     echo -e "  ${YELLOW}⚠${NC}  MCP wrapper not responding — check: docker compose logs mcp-wrapper"
 fi
 
+# Check Bridge
+if curl -sf http://localhost:8001/health &> /dev/null; then
+    BRIDGE_INFO=$(curl -sf http://localhost:8001/health)
+    HERMES_STATUS=$(echo "$BRIDGE_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin).get('hermes', False))" 2>/dev/null || echo "false")
+    if [ "$HERMES_STATUS" = "True" ] || [ "$HERMES_STATUS" = "true" ]; then
+        echo -e "  ${GREEN}✓${NC} Bridge is ready (Hermes: enabled)"
+    else
+        echo -e "  ${GREEN}✓${NC} Bridge is ready (Hermes: disabled — direct MCP mode)"
+    fi
+else
+    echo -e "  ${YELLOW}⚠${NC}  Bridge not responding — check: docker compose logs bridge"
+fi
+
 echo ""
 
 # ==============================================================================
-# Step 5 — Install dashboard dependencies
+# Step 5 — Install and start dashboard
 # ==============================================================================
 
 echo -e "${CYAN}Installing dashboard...${NC}"
 
-# Create frontend .env.local if it doesn't exist
+# Frontend env
 if [ ! -f "$SCRIPT_DIR/frontend/.env.local" ]; then
     cat > "$SCRIPT_DIR/frontend/.env.local" << ENVLOCAL
 NEXT_PUBLIC_BRIDGE_URL=ws://localhost:8001/ws
 NEXT_PUBLIC_DEFAULT_SPACE_ID=1
 ENVLOCAL
-    echo -e "  ${GREEN}✓${NC} Frontend .env.local created"
+    echo -e "  ${GREEN}✓${NC} Frontend config created"
 fi
 
-if [ -d "$SCRIPT_DIR/frontend/node_modules" ]; then
-    echo -e "  ${GREEN}✓${NC} Dependencies already installed"
-else
-    cd "$SCRIPT_DIR/frontend"
-    npm install --silent
-    cd "$SCRIPT_DIR"
-    echo -e "  ${GREEN}✓${NC} Dashboard dependencies installed"
-fi
+cd "$SCRIPT_DIR/frontend"
+npm install --silent 2>/dev/null
+echo -e "  ${GREEN}✓${NC} Dashboard dependencies installed"
 
 echo ""
 
@@ -417,18 +444,23 @@ echo ""
 
 echo -e "${GREEN}${BOLD}Setup complete!${NC}"
 echo ""
-echo "  Dashboard:   http://localhost:3000"
-echo "  SurfSense:   http://localhost:8929"
-echo "  MCP tools:   http://localhost:8000"
+echo "  ┌────────────────────────────────────────┐"
+echo "  │  Dashboard:   http://localhost:3000     │"
+echo "  │  Bridge:      http://localhost:8001     │"
+echo "  │  MCP tools:   http://localhost:8000     │"
+echo "  │  SurfSense:   http://localhost:8929     │"
+echo "  └────────────────────────────────────────┘"
 echo ""
-echo -e "${BOLD}Start DocuMentor:${NC}"
+echo -e "${BOLD}To start the dashboard:${NC}"
 echo ""
-echo "  # Terminal 1 — Dashboard"
 echo "  cd frontend && npm run dev"
 echo ""
-echo "  # Terminal 2 — Agent"
-echo "  hermes"
-echo ""
+if [ "$HERMES_ENABLED" = true ]; then
+    echo -e "${BOLD}To use Hermes Agent standalone:${NC}"
+    echo ""
+    echo "  hermes"
+    echo ""
+fi
 echo -e "${CYAN}Tip:${NC} To change the AI model, edit LLM_MODEL_NAME in .env"
-echo "     then run: docker compose restart mcp-wrapper && hermes"
+echo "     then run: docker compose restart"
 echo ""
