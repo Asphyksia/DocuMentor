@@ -34,7 +34,8 @@ from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
+from starlette.middleware import Middleware
+from starlette.routing import Mount, Route, Router
 
 # ---------------------------------------------------------------------------
 # Config
@@ -621,15 +622,31 @@ async def lifespan(app):
 # Configure FastMCP path — serve at /mcp directly (no double /mcp/mcp)
 mcp.settings.streamable_http_path = "/"
 
-app = Starlette(
+
+class TrailingSlashMiddleware:
+    """ASGI middleware: rewrite /mcp to /mcp/ so Mount sees it correctly.
+    Avoids the 307 redirect that Hermes can't follow."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/mcp":
+            scope = dict(scope)
+            scope["path"] = "/mcp/"
+        await self.app(scope, receive, send)
+
+
+_inner = Starlette(
     routes=[
-        Route("/jsonrpc", jsonrpc_handler, methods=["POST"]),  # for bridge
+        Route("/jsonrpc", jsonrpc_handler, methods=["POST"]),
         Route("/health", health_handler, methods=["GET"]),
-        Mount("/mcp", app=mcp.streamable_http_app()),  # Hermes: /mcp or /mcp/
+        Mount("/mcp", app=mcp.streamable_http_app()),
     ],
     lifespan=lifespan,
-    redirect_slashes=False,  # Don't 307 redirect /mcp -> /mcp/
 )
+
+app = TrailingSlashMiddleware(_inner)
 
 
 # ===========================================================================
