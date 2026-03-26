@@ -4,10 +4,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements-mcp.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# mcp_server.py is mounted or copied from surfsense-skill/
-# See docker-compose.yml volumes
+# mcp_server.py is mounted from surfsense-skill/ via docker-compose volumes
 
 EXPOSE 8000
