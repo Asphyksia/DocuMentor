@@ -1,0 +1,8 @@
+# Hermes MCP configuration for DocuMentor (Docker internal)
+# Mounted to /root/.hermes/config.yaml inside the container
+
+mcp_servers:
+  documenter:
+    url: "http://mcp-wrapper:8000/mcp/"
+    timeout: 120
+    connect_timeout: 30

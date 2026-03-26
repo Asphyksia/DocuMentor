@@ -1,7 +1,7 @@
 # ==============================================================================
 # DocuMentor — Docker Compose
 # ==============================================================================
-# Starts SurfSense (RAG backend) + DocuMentor MCP Wrapper
+# Starts SurfSense (RAG backend) + MCP Wrapper + Hermes Agent + Bridge
 #
 # Usage:
 #   1. cp .env.example .env && nano .env   (fill in REQUIRED fields)
@@ -21,7 +21,7 @@ services:
 
   # ----------------------------------------------------------------------------
   # DocuMentor MCP Wrapper
-  # Exposes SurfSense as tools for the Hermes agent
+  # Exposes SurfSense as 25 MCP tools for the Hermes agent
   # ----------------------------------------------------------------------------
   mcp-wrapper:
     build:
@@ -51,17 +51,43 @@ services:
       start_period: 30s
 
   # ----------------------------------------------------------------------------
+  # Hermes Agent Service
+  # AI reasoning engine — receives queries from bridge via HTTP/SSE
+  # Calls MCP tools on mcp-wrapper for document intelligence
+  # ----------------------------------------------------------------------------
+  hermes:
+    build:
+      context: .
+      dockerfile: hermes-service/Dockerfile
+    command: python server.py
+    volumes:
+      - ./hermes-service/hermes-config.yaml:/root/.hermes/config.yaml:ro
+    ports:
+      - "${HERMES_PORT:-8002}:8002"
+    env_file: .env
+    environment:
+      HERMES_PORT: "8002"
+      HERMES_AGENT_DIR: /app/hermes-agent
+      HERMES_HOME: /root/.hermes
+      HERMES_MODEL: ${HERMES_MODEL:-qwen/qwen3-235b-a22b}
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-https://openrouter.ai/api/v1}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      MCP_URL: http://mcp-wrapper:8000/mcp/
+    depends_on:
+      mcp-wrapper:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ----------------------------------------------------------------------------
   # DocuMentor Bridge
-  # WebSocket server — intelligent gateway between dashboard and Hermes/MCP
-  #
-  # The bridge imports Hermes AIAgent for query routing. When HERMES_API_KEY
-  # is set, queries go through Hermes (reasoning + tool use). Otherwise falls
-  # back to direct MCP calls.
-  #
-  # NOTE: For Hermes integration, the bridge needs access to hermes-agent source
-  # and its config. If running in Docker, mount the hermes-agent dir and config.
-  # For development, run the bridge outside Docker:
-  #   cd backend && python bridge.py
+  # WebSocket gateway — routes queries to Hermes (HTTP/SSE) or direct MCP
+  # Automatic fallback: if Hermes is down, queries go direct to MCP wrapper
   # ----------------------------------------------------------------------------
   bridge:
     build:
@@ -70,22 +96,18 @@ services:
     command: python bridge.py
     volumes:
       - upload-tmp:/tmp/documenter-uploads
-      - ./hermes-agent:/app/hermes-agent:ro
-      - ${HERMES_HOME:-~/.hermes}:/root/.hermes:ro
     ports:
       - "${BRIDGE_PORT:-8001}:8001"
     env_file: .env
     environment:
       MCP_URL: http://mcp-wrapper:8000
       BRIDGE_PORT: "8001"
-      HERMES_AGENT_DIR: /app/hermes-agent
-      HERMES_HOME: /root/.hermes
-      HERMES_MODEL: ${HERMES_MODEL:-}
-      HERMES_BASE_URL: ${HERMES_BASE_URL:-}
-      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      HERMES_URL: http://hermes:8002
     depends_on:
       mcp-wrapper:
         condition: service_healthy
+      hermes:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]

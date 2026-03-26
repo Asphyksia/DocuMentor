@@ -3,12 +3,13 @@ DocuMentor Bridge Server
 ------------------------
 WebSocket gateway between the Next.js dashboard and the MCP wrapper / Hermes Agent.
 
-Design principles (v0.3.0 — Hermes integration):
-  - Queries are routed through Hermes AIAgent for intelligent reasoning.
-  - CRUD operations (upload, delete, list) go direct to MCP wrapper.
-  - Streaming: agent responses stream token-by-token to the frontend.
+Design principles (v0.5.0 — Hermes as separate service):
+  - Queries are routed to Hermes service (HTTP/SSE) for intelligent reasoning.
+  - Automatic fallback: if Hermes is down, queries go direct to MCP wrapper.
+  - CRUD operations (upload, delete, list) always go direct to MCP wrapper.
+  - Streaming: Hermes SSE events are forwarded to the frontend via WebSocket.
   - Per-connection conversation history for multi-turn chat.
-  - Explicit message allowlist: only known message types are dispatched.
+  - CORS restricted to configured origins. Rate limiting per connection.
   - Pydantic validation: every inbound payload is validated before processing.
   - Structured error responses with error codes.
 
@@ -43,10 +44,8 @@ import json
 import logging
 import os
 import re
-import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,24 +56,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 # ---------------------------------------------------------------------------
-# Hermes AIAgent — imported from hermes-agent source
-# ---------------------------------------------------------------------------
-
-HERMES_AGENT_DIR = os.getenv(
-    "HERMES_AGENT_DIR",
-    os.path.join(os.path.dirname(__file__), "..", "hermes-agent"),
-)
-if os.path.isdir(HERMES_AGENT_DIR) and HERMES_AGENT_DIR not in sys.path:
-    sys.path.insert(0, HERMES_AGENT_DIR)
-
-_hermes_available = False
-try:
-    from run_agent import AIAgent
-    _hermes_available = True
-except ImportError:
-    AIAgent = None  # type: ignore[assignment,misc]
-
-# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -83,6 +64,10 @@ BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8001"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))  # 50 MB
 MCP_TIMEOUT = int(os.getenv("MCP_TIMEOUT", "120"))  # seconds
 HEALTH_TIMEOUT = 10
+
+# Hermes service (dedicated container)
+HERMES_URL = os.getenv("HERMES_URL", "http://localhost:8002")
+HERMES_TIMEOUT = int(os.getenv("HERMES_TIMEOUT", "180"))  # seconds
 
 # CORS — restrict to known frontends; override with ALLOWED_ORIGINS env var
 _default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
@@ -96,26 +81,7 @@ ALLOWED_ORIGINS = [
 RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_MAX", "30"))  # requests per window
 
-# Hermes Agent config
-HERMES_MODEL = os.getenv("HERMES_MODEL", "qwen/qwen3-235b-a22b")
-HERMES_BASE_URL = os.getenv("HERMES_BASE_URL", "https://openrouter.ai/api/v1")
-HERMES_API_KEY = os.getenv("HERMES_API_KEY", os.getenv("OPENROUTER_API_KEY", ""))
-HERMES_MAX_ITERATIONS = int(os.getenv("HERMES_MAX_ITERATIONS", "20"))
 MAX_CONVERSATION_MESSAGES = 20  # per-connection history limit
-
-DOCUMENTER_SYSTEM_PROMPT = """You are DocuMentor, an intelligent document analysis assistant for universities.
-You help users understand, query, and extract insights from their uploaded documents.
-
-You have access to SurfSense tools for document management and querying.
-When answering questions:
-1. Use the available search/query tools to find relevant information in the knowledge base.
-2. Structure your response clearly with sections if the answer is complex.
-3. Reference specific documents when relevant.
-4. For data extraction requests, provide structured data when possible.
-
-Always respond in the same language the user writes in.
-Be concise but thorough. If you don't find relevant information, say so honestly.
-"""
 
 logging.basicConfig(
     level=logging.INFO,
@@ -123,8 +89,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bridge")
 
-# Thread pool for running sync AIAgent in async context
-_agent_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hermes-agent")
 
 # ---------------------------------------------------------------------------
 # Error codes
@@ -189,7 +153,7 @@ class SearchDocumentsPayload(BaseModel):
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="DocuMentor Bridge", version="0.3.0")
+app = FastAPI(title="DocuMentor Bridge", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -224,54 +188,42 @@ def _check_rate_limit(ws_id: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Hermes AIAgent factory
+# ---------------------------------------------------------------------------
+# Hermes service client — detects availability, streams SSE responses
 # ---------------------------------------------------------------------------
 
-def _create_agent() -> "AIAgent | None":
-    """Create a fresh AIAgent configured for DocuMentor. Returns None if unavailable."""
-    if not _hermes_available or AIAgent is None:
-        logger.warning("Hermes AIAgent not available — queries will fall back to direct MCP")
-        return None
-    try:
-        agent = AIAgent(
-            model=HERMES_MODEL,
-            base_url=HERMES_BASE_URL,
-            api_key=HERMES_API_KEY,
-            platform="web",
-            enabled_toolsets=["mcp-surfsense"],
-            skip_context_files=True,
-            skip_memory=True,
-            quiet_mode=True,
-            max_iterations=HERMES_MAX_ITERATIONS,
-            ephemeral_system_prompt=DOCUMENTER_SYSTEM_PROMPT,
+_hermes_available: bool | None = None  # None = not checked yet
+_hermes_client: httpx.AsyncClient | None = None
+
+
+def get_hermes_client() -> httpx.AsyncClient:
+    global _hermes_client
+    if _hermes_client is None or _hermes_client.is_closed:
+        _hermes_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(HERMES_TIMEOUT, connect=10),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
-        logger.info("Hermes AIAgent created (model=%s, tools=%d)", HERMES_MODEL, len(agent.tools or []))
-        return agent
+    return _hermes_client
+
+
+async def _check_hermes() -> bool:
+    """Check if Hermes service is reachable. Caches result for 30s."""
+    global _hermes_available
+    try:
+        client = get_hermes_client()
+        resp = await client.get(f"{HERMES_URL}/health", timeout=5)
+        _hermes_available = resp.status_code == 200
     except Exception:
-        logger.exception("Failed to create Hermes AIAgent")
-        return None
+        _hermes_available = False
+    return _hermes_available
 
 
-# Lazy singleton agent + query lock to prevent callback interleaving
-_agent_instance: "AIAgent | None" = None
-_agent_init_attempted = False
-_agent_query_lock: asyncio.Lock | None = None
+async def is_hermes_available() -> bool:
+    """Return cached Hermes availability or check if unknown."""
+    if _hermes_available is None:
+        return await _check_hermes()
+    return _hermes_available
 
-
-def _get_query_lock() -> asyncio.Lock:
-    global _agent_query_lock
-    if _agent_query_lock is None:
-        _agent_query_lock = asyncio.Lock()
-    return _agent_query_lock
-
-
-def _get_agent() -> "AIAgent | None":
-    """Get or create the singleton AIAgent."""
-    global _agent_instance, _agent_init_attempted
-    if not _agent_init_attempted:
-        _agent_init_attempted = True
-        _agent_instance = _create_agent()
-    return _agent_instance
 
 # ---------------------------------------------------------------------------
 # MCP client — single reusable httpx client
@@ -553,12 +505,12 @@ def _parse_dashboard_from_text(text: str) -> dict | None:
 
 async def handle_query(ws: WebSocket, payload: dict) -> None:
     data = QueryPayload(**payload)
-    agent = _get_agent()
+    hermes_ok = await is_hermes_available()
 
     # ---------------------------------------------------------------
-    # Fallback: no Hermes → direct MCP call (legacy behavior)
+    # Fallback: no Hermes service → direct MCP call (legacy behavior)
     # ---------------------------------------------------------------
-    if agent is None:
+    if not hermes_ok:
         try:
             await send_status(ws, "querying", "Searching documents...")
             args: dict[str, Any] = {"query": data.query, "search_space_id": data.search_space_id}
@@ -582,77 +534,103 @@ async def handle_query(ws: WebSocket, payload: dict) -> None:
         return
 
     # ---------------------------------------------------------------
-    # Hermes Agent path — streaming + tool use
-    # Lock ensures only one query runs at a time (singleton agent
-    # has shared callback state). Concurrent queries are queued.
+    # Hermes service path — HTTP POST with SSE streaming
     # ---------------------------------------------------------------
-    async with _get_query_lock():
-        await _run_hermes_query(ws, agent, data)
+    await _run_hermes_query(ws, data)
 
 
-async def _run_hermes_query(ws: WebSocket, agent: "AIAgent", data: QueryPayload) -> None:
-    """Execute a query through Hermes AIAgent with streaming callbacks."""
+async def _run_hermes_query(ws: WebSocket, data: QueryPayload) -> None:
+    """Execute a query through Hermes service via HTTP/SSE streaming."""
     ws_id = id(ws)
     history = _conversation_histories.get(ws_id, [])
-    loop = asyncio.get_running_loop()
-
-    # Callback wrappers: fire from executor thread → async WebSocket send
-    def on_stream_delta(delta: str | None) -> None:
-        if delta is None:
-            # Stream finished signal from Hermes
-            asyncio.run_coroutine_threadsafe(
-                send_json(ws, {"type": "stream", "payload": {"delta": "", "done": True}}),
-                loop,
-            )
-            return
-        asyncio.run_coroutine_threadsafe(
-            send_json(ws, {"type": "stream", "payload": {"delta": delta, "done": False}}),
-            loop,
-        )
-
-    def on_tool_progress(tool_name: str, args_preview: str = "") -> None:
-        asyncio.run_coroutine_threadsafe(
-            send_json(ws, {
-                "type": "agent_status",
-                "payload": {"tool": tool_name, "status": "running", "preview": args_preview[:100]},
-            }),
-            loop,
-        )
-
-    def on_status(status_msg: str) -> None:
-        asyncio.run_coroutine_threadsafe(
-            send_status(ws, "querying", status_msg),
-            loop,
-        )
-
-    # Configure callbacks on the agent for this request
-    agent.stream_delta_callback = on_stream_delta
-    agent.tool_progress_callback = on_tool_progress
-    agent.status_callback = on_status
 
     try:
         await send_status(ws, "querying", "Thinking...")
 
-        def _run_agent() -> dict:
-            return agent.run_conversation(
-                user_message=data.query,
-                conversation_history=list(history),  # copy to avoid mutation
-            )
+        client = get_hermes_client()
+        request_body = {
+            "query": data.query,
+            "search_space_id": data.search_space_id,
+            "conversation_history": list(history),
+        }
+        if data.thread_id:
+            request_body["thread_id"] = data.thread_id
 
-        result = await loop.run_in_executor(_agent_executor, _run_agent)
+        # Stream SSE response from Hermes service
+        async with client.stream(
+            "POST",
+            f"{HERMES_URL}/query",
+            json=request_body,
+            timeout=HERMES_TIMEOUT,
+        ) as response:
+            if response.status_code != 200:
+                body = await response.aread()
+                raise Exception(f"Hermes returned {response.status_code}: {body.decode()}")
 
-        final_response = result.get("final_response", "")
-        updated_history = result.get("messages", [])
+            final_response = ""
+            final_dashboard = None
+            final_messages = []
 
-        # Trim and store conversation history
-        if len(updated_history) > MAX_CONVERSATION_MESSAGES:
-            updated_history = updated_history[-MAX_CONVERSATION_MESSAGES:]
-        _conversation_histories[ws_id] = updated_history
+            # Parse SSE events
+            event_type = ""
+            async for line in response.aiter_lines():
+                line = line.strip()
+                if not line:
+                    event_type = ""
+                    continue
+                if line.startswith("event:"):
+                    event_type = line[6:].strip()
+                    continue
+                if not line.startswith("data:"):
+                    continue
 
-        # Try to parse dashboard data from response
-        dashboard = _parse_dashboard_from_text(final_response)
-        if dashboard is None:
-            dashboard = {"type": "summary", "content": final_response, "query": data.query}
+                data_str = line[5:].strip()
+                try:
+                    event_data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+
+                if event_type == "delta":
+                    delta = event_data.get("delta", "")
+                    if delta:
+                        await send_json(ws, {
+                            "type": "stream",
+                            "payload": {"delta": delta, "done": False},
+                        })
+
+                elif event_type == "tool":
+                    await send_json(ws, {
+                        "type": "agent_status",
+                        "payload": {
+                            "tool": event_data.get("tool", ""),
+                            "status": event_data.get("status", "running"),
+                            "preview": event_data.get("preview", ""),
+                        },
+                    })
+
+                elif event_type == "status":
+                    await send_status(ws, "querying", event_data.get("message", ""))
+
+                elif event_type == "done":
+                    final_response = event_data.get("response", "")
+                    final_messages = event_data.get("messages", [])
+                    final_dashboard = event_data.get("dashboard")
+
+                elif event_type == "error":
+                    error_msg = event_data.get("error", "Unknown Hermes error")
+                    raise Exception(error_msg)
+
+        # Update conversation history
+        if final_messages:
+            if len(final_messages) > MAX_CONVERSATION_MESSAGES:
+                final_messages = final_messages[-MAX_CONVERSATION_MESSAGES:]
+            _conversation_histories[ws_id] = final_messages
+
+        # Build dashboard if not provided
+        if final_dashboard is None:
+            final_dashboard = _parse_dashboard_from_text(final_response)
+        if final_dashboard is None:
+            final_dashboard = {"type": "summary", "content": final_response, "query": data.query}
 
         # Send final result
         await send_json(ws, {
@@ -665,11 +643,19 @@ async def _run_hermes_query(ws: WebSocket, agent: "AIAgent", data: QueryPayload)
                 "action": "query",
                 "query": data.query,
                 "response": final_response,
-                "dashboard": dashboard,
+                "dashboard": final_dashboard,
             },
         })
         await send_status(ws, "ready", "Query complete")
 
+    except httpx.ConnectError:
+        logger.error("Hermes service unreachable")
+        # Mark as unavailable for next request
+        global _hermes_available
+        _hermes_available = False
+        await send_json(ws, {"type": "stream", "payload": {"delta": "", "done": True}})
+        await send_status(ws, "error", "Hermes service unreachable")
+        await send_error(ws, ErrorCode.MCP_UNREACHABLE, "Hermes service is not reachable. Try again for direct search fallback.")
     except Exception as e:
         logger.exception("Hermes query error")
         await send_json(ws, {
@@ -678,12 +664,6 @@ async def _run_hermes_query(ws: WebSocket, agent: "AIAgent", data: QueryPayload)
         })
         await send_status(ws, "error", f"Query failed: {e}")
         await send_error(ws, ErrorCode.INTERNAL_ERROR, f"Agent error: {e}")
-    finally:
-        # Clear callbacks to avoid leaking ws references
-        agent.stream_delta_callback = None
-        agent.tool_progress_callback = None
-        agent.status_callback = None
-
 
 async def handle_extract(ws: WebSocket, payload: dict) -> None:
     data = ExtractPayload(**payload)
@@ -889,9 +869,10 @@ async def health():
     return {
         "status": "ok",
         "service": "documenter-bridge",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "clients": len(active_connections),
-        "hermes": _hermes_available,
+        "hermes": _hermes_available or False,
+        "hermes_url": HERMES_URL,
         "cors_origins": ALLOWED_ORIGINS,
         "rate_limit": f"{RATE_LIMIT_MAX}/{RATE_LIMIT_WINDOW}s",
     }
@@ -902,17 +883,18 @@ async def health():
 
 @app.on_event("shutdown")
 async def shutdown():
-    global _mcp_client
+    global _mcp_client, _hermes_client
     if _mcp_client and not _mcp_client.is_closed:
         await _mcp_client.aclose()
-    _agent_executor.shutdown(wait=False)
+    if _hermes_client and not _hermes_client.is_closed:
+        await _hermes_client.aclose()
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info("Starting DocuMentor Bridge v0.4.0 on port %s", BRIDGE_PORT)
+    logger.info("Starting DocuMentor Bridge v0.5.0 on port %s", BRIDGE_PORT)
     logger.info("CORS origins: %s", ALLOWED_ORIGINS)
     logger.info("Rate limit: %d requests per %ds window", RATE_LIMIT_MAX, RATE_LIMIT_WINDOW)
     logger.info("MCP wrapper: %s", MCP_BASE)
