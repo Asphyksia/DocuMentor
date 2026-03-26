@@ -469,6 +469,14 @@ async def handle_upload(ws: WebSocket, payload: dict) -> None:
         })
         await send_status(ws, "ready", f"{data.filename} processed successfully")
 
+        # Inject system event into conversation history so Hermes knows about uploads
+        ws_id = id(ws)
+        history = _conversation_histories.setdefault(ws_id, [])
+        history.append({
+            "role": "system",
+            "content": f"[System] Document '{data.filename}' (doc_id={doc_id}) was uploaded and indexed in space {data.search_space_id}.",
+        })
+
         # Refresh doc list
         await handle_list_docs(ws, {"search_space_id": data.search_space_id})
 
@@ -701,6 +709,13 @@ async def handle_delete_document(ws: WebSocket, payload: dict) -> None:
         await send_json(ws, {
             "type": "result",
             "payload": {"action": "delete_document", "document_id": data.document_id, "result": result},
+        })
+        # Inject system event
+        ws_id = id(ws)
+        history = _conversation_histories.setdefault(ws_id, [])
+        history.append({
+            "role": "system",
+            "content": f"[System] Document (id={data.document_id}) was deleted.",
         })
         if data.search_space_id:
             await handle_list_docs(ws, {"search_space_id": data.search_space_id})

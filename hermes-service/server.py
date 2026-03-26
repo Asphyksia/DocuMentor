@@ -102,24 +102,37 @@ _agent_lock = asyncio.Lock()
 
 def _create_agent() -> AIAgent:
     """Create a configured AIAgent instance."""
+    # Ensure MCP tools are discovered (may fail at import time if mcp-wrapper wasn't ready)
+    try:
+        from tools.mcp_tool import discover_mcp_tools
+        tool_names = discover_mcp_tools()
+        logger.info("MCP discovery found %d tools: %s", len(tool_names), ", ".join(tool_names[:5]))
+    except Exception as e:
+        logger.warning("MCP tool rediscovery failed: %s", e)
+
     agent = AIAgent(
         base_url=HERMES_BASE_URL,
         api_key=HERMES_API_KEY,
         model=HERMES_MODEL,
         max_iterations=HERMES_MAX_ITERATIONS,
         platform="web",
-        enabled_toolsets=["mcp-surfsense"],
+        enabled_toolsets=["mcp-documenter"],
         skip_context_files=True,
         skip_memory=True,
         quiet_mode=True,
         ephemeral_system_prompt=SYSTEM_PROMPT,
     )
+    tool_names = [t.get("function", {}).get("name", "?") for t in (agent.tools or [])]
     logger.info(
         "AIAgent created (model=%s, base_url=%s, tools=%d)",
         HERMES_MODEL,
         HERMES_BASE_URL,
-        len(agent.tools or []),
+        len(tool_names),
     )
+    if tool_names:
+        logger.info("Registered tools: %s", ", ".join(tool_names))
+    else:
+        logger.warning("⚠️ No tools registered! Check MCP config at /root/.hermes/config.yaml")
     return agent
 
 
