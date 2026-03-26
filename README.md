@@ -37,7 +37,7 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
 **What it doesn't do (yet):**
 - Multi-user auth / RBAC — it's single-user for now (auth planned)
 - Offline queries — requires a live LLM provider
-- Production hardening — functional for demos and evaluation (CORS and rate limiting added in v0.4.0)
+- Production hardening — functional for demos and evaluation (CORS, rate limiting, Hermes container in v0.5.0)
 
 > DocuMentor orchestrates existing open-source tools (SurfSense for RAG, Docling for parsing, pgvector for search). Its value is the unified UI, the MCP tool layer, the bridge server, and the guided setup. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
 
@@ -56,11 +56,11 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
            │  Bridge (:8001)  │
            │  WebSocket GW    │──────────────────────┐
            └────────┬────────┘                       │
-                    │                                │
+                    │ HTTP/SSE                        │
           ┌─────────▼──────────┐          ┌──────────▼──────────┐
-          │  Hermes AIAgent    │          │  Direct MCP calls   │
-          │  (reasoning +      │          │  (CRUD: upload,     │
-          │   tool selection)  │          │   delete, list)     │
+          │  Hermes (:8002)    │          │  Direct MCP calls   │
+          │  (dedicated        │          │  (CRUD: upload,     │
+          │   container)       │          │   delete, list)     │
           └─────────┬──────────┘          └──────────┬──────────┘
                     │ MCP tool calls                  │
                     ▼                                 ▼
@@ -86,7 +86,7 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
 ```
 
 **Data flow summary:**
-- **Queries** go through Hermes Agent (when configured) for intelligent reasoning, or directly to MCP tools as fallback
+- **Queries** go through Hermes service (:8002, HTTP/SSE) for intelligent reasoning, or directly to MCP tools as fallback
 - **CRUD operations** (upload, delete, list) always go directly to MCP — no AI overhead
 - **Document parsing** runs locally via Docling inside Docker
 - **Embeddings** generated locally with `sentence-transformers/all-MiniLM-L6-v2`
@@ -141,35 +141,35 @@ npm run dev
 
 ### Setup
 
+Hermes runs as a **dedicated Docker container** (v0.5.0+). Just set the API key in `.env`:
+
 ```bash
-# 1. Copy the Hermes config
-cp hermes-config.example.yaml ~/.hermes/config.yaml
+# In .env, uncomment and fill in:
+HERMES_API_KEY=your_api_key_here
+HERMES_BASE_URL=https://relay.opengpu.network/v2/openai/v1  # or OpenRouter, etc.
+HERMES_MODEL=openai/gpt-5.2                                  # with provider prefix
 
-# 2. Set the API key in .env
-# Uncomment and fill in:
-#   HERMES_API_KEY=your_openrouter_key_here
-#   HERMES_BASE_URL=https://openrouter.ai/api/v1
-#   HERMES_MODEL=qwen/qwen3-235b-a22b
-
-# 3. Restart the bridge to pick up changes
-docker compose restart bridge
+# Start/restart services
+docker compose up -d --build hermes bridge
 ```
+
+The MCP config for Hermes is pre-configured (`hermes-service/hermes-config.yaml`) — no manual setup needed.
 
 ### How it works
 
-When `HERMES_API_KEY` is set, the bridge imports Hermes `AIAgent` and routes user queries through it:
+The bridge detects Hermes automatically via health check and routes queries through it:
 
-1. User asks a question → Bridge sends it to `AIAgent.run_conversation()`
+1. User asks a question → Bridge POSTs to Hermes service (HTTP/SSE)
 2. Hermes reasons about the query and decides which MCP tools to call
 3. Tools execute against SurfSense via the MCP wrapper
-4. Hermes synthesizes a final response, streamed back to the frontend in real-time
+4. Hermes streams the response back (SSE events: delta, tool, status, done)
+5. Bridge forwards SSE events to the frontend via WebSocket
 
 New WebSocket message types when Hermes is active:
 - `stream` — streaming text tokens as they're generated
 - `agent_status` — which tool is running (e.g., `surfsense_query`)
-- `thinking` — agent reasoning (debug mode)
 
-Without Hermes, the bridge falls back to direct MCP calls — still functional, just less intelligent.
+Without Hermes (container not running or unhealthy), the bridge falls back to direct MCP calls — still functional, just less intelligent. No code changes needed to switch.
 
 ---
 

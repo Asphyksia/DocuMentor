@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, forwardRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Loader2, Bot, User, Plus } from "lucide-react";
 import clsx from "clsx";
@@ -37,11 +37,13 @@ function StreamingCursor() {
 // Message bubble
 // ---------------------------------------------------------------------------
 
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+const MessageBubble = forwardRef<HTMLDivElement, { msg: ChatMessage }>(
+  function MessageBubble({ msg }, ref) {
   const isUser = msg.role === "user";
 
   return (
     <motion.div
+      ref={ref}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
@@ -120,7 +122,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
       )}
     </motion.div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Chat panel
