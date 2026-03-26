@@ -1,26 +1,4 @@
-# Hermes Service — HTTP wrapper dependencies
+# Hermes Service — HTTP wrapper deps (hermes-agent deps installed via pyproject.toml)
 fastapi>=0.100.0
 uvicorn[standard]>=0.20.0
 sse-starlette>=1.6.0
-pydantic>=2.0
-
-# Hermes AIAgent dependencies (from hermes-agent/pyproject.toml)
-openai
-anthropic>=0.39.0
-python-dotenv
-fire
-httpx
-rich
-tenacity
-pyyaml
-requests
-jinja2
-prompt_toolkit
-
-# MCP support (required for Hermes MCP toolset)
-mcp[cli]
-
-# litellm — pinned to avoid supply chain attack (1.82.7-1.82.8 compromised)
-litellm>=1.75.5,<1.82.7
-typer
-platformdirs

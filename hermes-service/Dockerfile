@@ -6,12 +6,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install dependencies first (cached layer)
-COPY hermes-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy hermes-agent source
+# Copy hermes-agent source first (for pip install -e)
 COPY hermes-agent/ ./hermes-agent/
+
+# Install hermes-agent with all its deps from pyproject.toml + MCP support
+RUN pip install --no-cache-dir \
+    -e "./hermes-agent[mcp]" \
+    "litellm>=1.75.5,<1.82.7"
+
+# Install service-specific deps (FastAPI, SSE, uvicorn)
+COPY hermes-service/requirements.txt ./service-requirements.txt
+RUN pip install --no-cache-dir -r service-requirements.txt
 
 # Copy service code
 COPY hermes-service/server.py .
