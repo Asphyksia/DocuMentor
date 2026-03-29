@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { useTheme } from "next-themes";
 import {
   Plus,
   Database,
@@ -11,6 +12,10 @@ import {
   Shield,
   LogOut,
   Keyboard,
+  Sun,
+  Moon,
+  Monitor,
+  Palette,
 } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
@@ -100,6 +105,7 @@ export default function SettingsPanel({
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [health, setHealth] = useState<HealthInfo>({});
+  const { theme, setTheme } = useTheme();
 
   useEffect(() => {
     fetchHealth().then(setHealth);
@@ -275,11 +281,53 @@ export default function SettingsPanel({
         </Card>
       </motion.div>
 
-      {/* Keyboard Shortcuts */}
+      {/* Appearance */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.2 }}
+      >
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Palette className="w-4 h-4 text-primary" />
+              Appearance
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              {[
+                { id: "dark", label: "Dark", icon: Moon },
+                { id: "light", label: "Light", icon: Sun },
+              ].map((t) => {
+                const Icon = t.icon;
+                const active = theme === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTheme(t.id)}
+                    className={clsx(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all border",
+                      active
+                        ? "bg-primary/10 border-primary/30 text-foreground"
+                        : "bg-muted/50 border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Keyboard Shortcuts */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.25 }}
       >
         <Card>
           <CardHeader className="pb-3">
@@ -319,7 +367,7 @@ export default function SettingsPanel({
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.25 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
         >
           <Button
             variant="outline"
