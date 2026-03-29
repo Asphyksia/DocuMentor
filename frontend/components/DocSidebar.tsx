@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -12,9 +12,12 @@ import {
   Loader2,
   Upload,
   Trash2,
+  Search,
+  X,
 } from "lucide-react";
 import clsx from "clsx";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -124,6 +127,13 @@ export default function DocSidebar({
   isLoading,
 }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<DocItem | null>(null);
+  const [search, setSearch] = useState("");
+
+  const filteredDocs = useMemo(() => {
+    if (!search.trim()) return documents;
+    const q = search.toLowerCase();
+    return documents.filter((d) => d.title.toLowerCase().includes(q));
+  }, [documents, search]);
 
   return (
     <aside className="w-64 h-full bg-background flex flex-col border-r border-border">
@@ -173,6 +183,29 @@ export default function DocSidebar({
         </motion.button>
       </div>
 
+      {/* Search */}
+      {!isLoading && documents.length > 0 && (
+        <div className="px-3 pb-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search docs..."
+              className="h-8 pl-8 pr-7 text-xs"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Document list */}
       <div className="flex-1 overflow-y-auto px-2 pb-4">
         {isLoading && <SidebarSkeleton />}
@@ -181,8 +214,16 @@ export default function DocSidebar({
           <EmptyState onUploadClick={onUploadClick} />
         )}
 
+        {!isLoading && search && filteredDocs.length === 0 && documents.length > 0 && (
+          <div className="text-center py-6 px-4">
+            <p className="text-xs text-muted-foreground">
+              No documents matching "{search}"
+            </p>
+          </div>
+        )}
+
         <AnimatePresence mode="popLayout">
-          {documents.map((doc) => (
+          {filteredDocs.map((doc) => (
             <motion.button
               key={doc.id}
               layout
@@ -235,7 +276,9 @@ export default function DocSidebar({
 
       {/* Footer stats */}
       <div className="px-4 py-3 border-t border-border text-[10px] text-muted-foreground">
-        {documents.length} document{documents.length !== 1 ? "s" : ""}
+        {search
+          ? `${filteredDocs.length} of ${documents.length} documents`
+          : `${documents.length} document${documents.length !== 1 ? "s" : ""}`}
       </div>
     </aside>
   );

@@ -1,7 +1,51 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DashboardData } from "../types/bridge";
+
+// ---------------------------------------------------------------------------
+// LocalStorage persistence
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = "documenter_chat_history";
+const MAX_PERSISTED = 50; // keep last N messages
+
+function loadPersistedMessages(): ChatMessage[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ChatMessage[];
+    // Strip runtime flags
+    return parsed.map((m) => ({
+      ...m,
+      isLoading: false,
+      isStreaming: false,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+function persistMessages(messages: ChatMessage[]) {
+  if (typeof window === "undefined") return;
+  try {
+    // Only persist completed messages, skip loading/streaming
+    const toSave = messages
+      .filter((m) => !m.isLoading && !m.isStreaming)
+      .slice(-MAX_PERSISTED);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+  } catch {
+    // quota exceeded etc — silently fail
+  }
+}
+
+function clearPersistedMessages() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
 
 export interface ChatMessage {
   id: string;
@@ -24,11 +68,20 @@ const WELCOME: ChatMessage = {
 };
 
 export function useChatState() {
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const persisted = loadPersistedMessages();
+    return persisted && persisted.length > 0 ? persisted : [WELCOME];
+  });
   const [input, setInput] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const streamingContentRef = useRef("");
   const lastQueryRef = useRef<string | null>(null);
+
+  // Persist on message changes (debounced to avoid excessive writes)
+  useEffect(() => {
+    const timer = setTimeout(() => persistMessages(messages), 300);
+    return () => clearTimeout(timer);
+  }, [messages]);
 
   const addUserMessage = useCallback((content: string): string => {
     const id = Date.now().toString();
@@ -179,6 +232,7 @@ export function useChatState() {
     setMessages([WELCOME]);
     setInput("");
     setIsQuerying(false);
+    clearPersistedMessages();
   }, []);
 
   const clearInput = useCallback(() => setInput(""), []);

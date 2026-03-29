@@ -301,7 +301,7 @@ export default function Home() {
                 <DashboardRenderer data={dash.dashboard} />
               </motion.div>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Upload or query a document to see the dashboard here.
               </div>
             )}
@@ -314,6 +314,7 @@ export default function Home() {
             activeSpaceId={docs.activeSpaceId}
             onChangeSpace={docs.setActiveSpaceId}
             onCreateSpace={(name, desc) => bridge.createSpace(name, desc)}
+            onLogout={auth.authEnabled ? auth.logout : undefined}
           />
         );
     }
