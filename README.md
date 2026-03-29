@@ -35,9 +35,9 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
 - Optionally routes queries through [Hermes Agent](https://github.com/NousResearch/hermes-agent) for intelligent reasoning and multi-step tool use
 
 **What it doesn't do (yet):**
-- Multi-user auth / RBAC — it's single-user for now (auth planned)
+- Multi-user / RBAC — single-user auth (JWT login, one install per user)
 - Offline queries — requires a live LLM provider
-- Production hardening — functional for demos and evaluation (CORS, rate limiting, Hermes container in v0.5.0)
+- Automated tests / CI — planned for next sprint
 
 > DocuMentor orchestrates existing open-source tools (SurfSense for RAG, Docling for parsing, pgvector for search). Its value is the unified UI, the MCP tool layer, the bridge server, and the guided setup. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture.
 
@@ -45,44 +45,19 @@ DocuMentor is a self-hosted document intelligence platform built for universitie
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│            Frontend (Next.js :3000)              │
-│   Chat · Dashboard · Document Manager · Settings│
-└────────────────────┬────────────────────────────┘
-                     │ WebSocket
-                     ▼
-           ┌─────────────────┐
-           │  Bridge (:8001)  │
-           │  WebSocket GW    │──────────────────────┐
-           └────────┬────────┘                       │
-                    │ HTTP/SSE                        │
-          ┌─────────▼──────────┐          ┌──────────▼──────────┐
-          │  Hermes (:8002)    │          │  Direct MCP calls   │
-          │  (dedicated        │          │  (CRUD: upload,     │
-          │   container)       │          │   delete, list)     │
-          └─────────┬──────────┘          └──────────┬──────────┘
-                    │ MCP tool calls                  │
-                    ▼                                 ▼
-           ┌─────────────────┐
-           │ MCP Wrapper     │
-           │ (:8000)         │
-           │ 25 tools        │
-           └────────┬────────┘
-                    │ REST API
-                    ▼
-           ┌─────────────────┐
-           │ SurfSense       │
-           │ (:8929)         │
-           │ Hybrid search · │
-           │ Docling · pgvec │
-           └────────┬────────┘
-                    │
-                    ▼
-           ┌─────────────────┐
-           │ LLM Provider    │
-           │ (RelayGPU, etc) │
-           └─────────────────┘
+```mermaid
+graph TD
+    A["🖥️ Frontend (Next.js :3000)<br/>Chat · Dashboard · Docs · Settings"] -->|WebSocket + JWT| B
+
+    B["🔌 Bridge :8001<br/>WebSocket Gateway · Auth"] -->|"HTTP/SSE (queries)"| C
+    B -->|"JSON-RPC (CRUD)"| D
+
+    C["🤖 Hermes :8002<br/>AI Agent Pool (x3)"] -->|Reasoning + Generation| E["☁️ LLM Provider<br/>(RelayGPU)"]
+    C -->|MCP tool calls| D
+
+    D["🔧 MCP Wrapper :8000<br/>25 tools"] -->|REST API| F
+
+    F["📦 SurfSense :8929<br/>Hybrid Search · Docling · pgvector"]
 ```
 
 **Data flow summary:**

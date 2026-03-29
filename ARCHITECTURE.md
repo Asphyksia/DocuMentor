@@ -20,46 +20,19 @@ DocuMentor does **not** implement its own:
 
 ## System diagram
 
-```
-┌──────────────────────────────────────────────────────┐
-│                  User's Browser                       │
-│  Next.js dashboard (:3000)                            │
-│  Chat · Dashboard · Document Manager · Settings       │
-│  Theme toggle · Persistent history · Responsive UI    │
-└────────────────────────┬─────────────────────────────┘
-                         │ WebSocket (JWT auth)
-                         ▼
-                  ┌──────────────┐
-                  │ Bridge :8001 │
-                  │ WebSocket GW │
-                  │  v0.6.0      │
-                  └──┬────────┬──┘
-                     │        │
-            Queries  │        │  CRUD (upload,
-           (HTTP/SSE)│        │  delete, list)
-                     ▼        │
-       ┌──────────────┐       │
-       │ Hermes :8002 │       │
-       │  AI Agent    │       │
-       │ (pool x3)    │       │
-       └──┬────────┬──┘       │
-          │        │          │
-          │    MCP tool calls │
-          ▼        │          ▼
-    ┌──────────┐   │  ┌──────────────┐
-    │   LLM    │   └─>│ MCP Wrapper  │
-    │ Provider │      │   :8000      │
-    │(RelayGPU)│      │  25 tools    │
-    └──────────┘      └──────┬───────┘
-                             │ REST API
-                             ▼
-                      ┌──────────────┐
-                      │  SurfSense   │
-                      │    :8929     │
-                      │ Hybrid search│
-                      │ Docling ETL  │
-                      │ pgvector     │
-                      └──────────────┘
+```mermaid
+graph TD
+    A["🖥️ Frontend (Next.js :3000)<br/>Chat · Dashboard · Docs · Settings<br/>Theme toggle · Persistent history · Responsive UI"] -->|"WebSocket (JWT auth)"| B
+
+    B["🔌 Bridge :8001 (v0.6.0)<br/>WebSocket Gateway · Auth · Rate Limiting"] -->|"HTTP/SSE (queries)"| C
+    B -->|"JSON-RPC (CRUD: upload, delete, list)"| D
+
+    C["🤖 Hermes :8002 (v0.5.0)<br/>AI Agent Pool (x3)<br/>Reasoning + Tool Selection"] -->|"Reasoning + Generation"| E["☁️ LLM Provider<br/>(RelayGPU, OpenRouter, etc.)"]
+    C -->|"MCP tool calls"| D
+
+    D["🔧 MCP Wrapper :8000<br/>25 tools · Dual protocol<br/>(Streamable HTTP + JSON-RPC)"] -->|REST API| F
+
+    F["📦 SurfSense :8929<br/>Hybrid Search · Docling ETL<br/>pgvector · PostgreSQL · Redis"]
 ```
 
 **Key data flows:**
