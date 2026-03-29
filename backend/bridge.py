@@ -96,9 +96,14 @@ MAX_CONVERSATION_MESSAGES = 20  # per-connection history limit
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    format="%(asctime)s %(levelname)s [%(name)s] [%(funcName)s] %(message)s",
 )
 logger = logging.getLogger("bridge")
+
+import uuid as _uuid
+
+def _req_id() -> str:
+    return _uuid.uuid4().hex[:8]
 
 
 # ---------------------------------------------------------------------------

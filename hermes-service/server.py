@@ -75,14 +75,22 @@ Do NOT identify yourself as SurfSense or any other tool — you are DocuMentor."
 logger = logging.getLogger("hermes-service")
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    format="%(asctime)s [%(name)s] %(levelname)s [%(funcName)s] %(message)s",
 )
+
+# Request ID for structured tracing
+import uuid as _uuid
+
+def _req_id() -> str:
+    return _uuid.uuid4().hex[:8]
 
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Hermes Service", version="0.4.0")
+AGENT_POOL_SIZE = int(os.getenv("HERMES_POOL_SIZE", "3"))
+
+app = FastAPI(title="Hermes Service", version="0.5.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,23 +100,23 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Agent management
+# Agent pool — concurrent queries without serialization
 # ---------------------------------------------------------------------------
 
-_agent_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hermes")
-_agent: Optional[AIAgent] = None
-_agent_lock = asyncio.Lock()
+_agent_executor = ThreadPoolExecutor(max_workers=AGENT_POOL_SIZE + 1, thread_name_prefix="hermes")
+_agent_pool: asyncio.Queue["AIAgent"] = asyncio.Queue()
+_pool_initialized = False
+_pool_lock = asyncio.Lock()
 
 
-def _create_agent() -> AIAgent:
+def _create_agent(agent_id: int = 0) -> AIAgent:
     """Create a configured AIAgent instance."""
-    # Ensure MCP tools are discovered (may fail at import time if mcp-wrapper wasn't ready)
     try:
         from tools.mcp_tool import discover_mcp_tools
         tool_names = discover_mcp_tools()
-        logger.info("MCP discovery found %d tools: %s", len(tool_names), ", ".join(tool_names[:5]))
+        logger.info("agent-%d: MCP discovery found %d tools", agent_id, len(tool_names))
     except Exception as e:
-        logger.warning("MCP tool rediscovery failed: %s", e)
+        logger.warning("agent-%d: MCP tool rediscovery failed: %s", agent_id, e)
 
     agent = AIAgent(
         base_url=HERMES_BASE_URL,
@@ -122,28 +130,50 @@ def _create_agent() -> AIAgent:
         quiet_mode=True,
         ephemeral_system_prompt=SYSTEM_PROMPT,
     )
-    tool_names = [t.get("function", {}).get("name", "?") for t in (agent.tools or [])]
+    tool_count = len(agent.tools or [])
     logger.info(
-        "AIAgent created (model=%s, base_url=%s, tools=%d)",
-        HERMES_MODEL,
-        HERMES_BASE_URL,
-        len(tool_names),
+        "agent-%d: created (model=%s, tools=%d)",
+        agent_id, HERMES_MODEL, tool_count,
     )
-    if tool_names:
-        logger.info("Registered tools: %s", ", ".join(tool_names))
-    else:
-        logger.warning("⚠️ No tools registered! Check MCP config at /root/.hermes/config.yaml")
+    if tool_count == 0:
+        logger.warning("agent-%d: ⚠️ No tools registered!", agent_id)
     return agent
 
 
-async def get_agent() -> AIAgent:
-    """Get or create the singleton AIAgent."""
-    global _agent
-    async with _agent_lock:
-        if _agent is None:
-            loop = asyncio.get_running_loop()
-            _agent = await loop.run_in_executor(_agent_executor, _create_agent)
-        return _agent
+async def _init_pool() -> None:
+    """Initialize the agent pool (lazy, once)."""
+    global _pool_initialized
+    async with _pool_lock:
+        if _pool_initialized:
+            return
+        loop = asyncio.get_running_loop()
+        logger.info("Initializing agent pool (size=%d)...", AGENT_POOL_SIZE)
+        for i in range(AGENT_POOL_SIZE):
+            agent = await loop.run_in_executor(_agent_executor, _create_agent, i)
+            await _agent_pool.put(agent)
+        _pool_initialized = True
+        logger.info("Agent pool ready (%d agents)", AGENT_POOL_SIZE)
+
+
+class _AgentLease:
+    """Context manager: borrow an agent from the pool, return it after."""
+
+    def __init__(self):
+        self.agent: Optional[AIAgent] = None
+
+    async def __aenter__(self) -> AIAgent:
+        await _init_pool()
+        self.agent = await _agent_pool.get()
+        return self.agent
+
+    async def __aexit__(self, *exc):
+        if self.agent is not None:
+            await _agent_pool.put(self.agent)
+
+
+def lease_agent() -> _AgentLease:
+    """Borrow an agent from the pool. Usage: async with lease_agent() as agent: ..."""
+    return _AgentLease()
 
 
 # ---------------------------------------------------------------------------
@@ -185,14 +215,15 @@ def _parse_dashboard(text: str) -> Optional[dict]:
 async def query_endpoint(request: QueryRequest):
     """Run a query through Hermes AIAgent with SSE streaming."""
 
-    agent = await get_agent()
+    rid = _req_id()
+    logger.info("[%s] query: %.80s (space=%d)", rid, request.query, request.search_space_id)
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
     # Callbacks: push events into the async queue from the executor thread
     def on_stream_delta(delta: str | None) -> None:
         if delta is None:
-            return  # We send 'done' after run_conversation completes
+            return
         asyncio.run_coroutine_threadsafe(
             queue.put({"event": "delta", "data": {"delta": delta}}),
             loop,
@@ -213,87 +244,93 @@ async def query_endpoint(request: QueryRequest):
             loop,
         )
 
-    # Configure callbacks
-    agent.stream_delta_callback = on_stream_delta
-    agent.tool_progress_callback = on_tool_progress
-    agent.status_callback = on_status
-
     async def event_generator():
-        """Generate SSE events from the queue."""
-        # Start the agent in the thread pool
-        def _run():
-            try:
-                result = agent.run_conversation(
-                    user_message=request.query,
-                    conversation_history=list(request.conversation_history),
-                )
-                return result
-            except Exception as e:
-                logger.exception("Agent error")
-                return {"error": str(e)}
+        """Generate SSE events from the queue. Agent is leased from pool."""
+        agent_lease = lease_agent()
+        agent = await agent_lease.__aenter__()
+        t_start = time.time()
 
-        task = loop.run_in_executor(_agent_executor, _run)
+        try:
+            # Set callbacks on the leased agent
+            agent.stream_delta_callback = on_stream_delta
+            agent.tool_progress_callback = on_tool_progress
+            agent.status_callback = on_status
 
-        # Stream events until the agent finishes
-        while True:
-            # Check if task is done
-            if task.done():
-                # Drain remaining events
-                while not queue.empty():
-                    item = await queue.get()
+            def _run():
+                try:
+                    return agent.run_conversation(
+                        user_message=request.query,
+                        conversation_history=list(request.conversation_history),
+                    )
+                except Exception as e:
+                    logger.exception("[%s] Agent error", rid)
+                    return {"error": str(e)}
+
+            task = loop.run_in_executor(_agent_executor, _run)
+
+            # Stream events until the agent finishes
+            while True:
+                if task.done():
+                    while not queue.empty():
+                        item = await queue.get()
+                        yield {
+                            "event": item["event"],
+                            "data": json.dumps(item["data"]),
+                        }
+                    break
+
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=0.5)
                     yield {
                         "event": item["event"],
                         "data": json.dumps(item["data"]),
                     }
-                break
+                except asyncio.TimeoutError:
+                    continue
 
-            # Wait for events with timeout
+            # Get the result
             try:
-                item = await asyncio.wait_for(queue.get(), timeout=0.5)
+                result = await task
+            except Exception as e:
                 yield {
-                    "event": item["event"],
-                    "data": json.dumps(item["data"]),
+                    "event": "error",
+                    "data": json.dumps({"error": str(e)}),
                 }
-            except asyncio.TimeoutError:
-                continue
+                return
 
-        # Get the result
-        try:
-            result = await task
-        except Exception as e:
+            if "error" in result:
+                logger.warning("[%s] query failed: %s", rid, result["error"])
+                yield {
+                    "event": "error",
+                    "data": json.dumps({"error": result["error"]}),
+                }
+                return
+
+            # Build final response
+            final_response = result.get("final_response", "")
+            messages = result.get("messages", [])
+            dashboard = _parse_dashboard(final_response)
+            if dashboard is None:
+                dashboard = {"type": "summary", "content": final_response, "query": request.query}
+
+            elapsed = time.time() - t_start
+            logger.info("[%s] query complete (%.1fs, %d chars)", rid, elapsed, len(final_response))
+
             yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)}),
+                "event": "done",
+                "data": json.dumps({
+                    "response": final_response,
+                    "messages": messages,
+                    "dashboard": dashboard,
+                }),
             }
-            return
 
-        if "error" in result:
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": result["error"]}),
-            }
-            return
-
-        # Build final response
-        final_response = result.get("final_response", "")
-        messages = result.get("messages", [])
-        dashboard = _parse_dashboard(final_response)
-        if dashboard is None:
-            dashboard = {"type": "summary", "content": final_response, "query": request.query}
-
-        yield {
-            "event": "done",
-            "data": json.dumps({
-                "response": final_response,
-                "messages": messages,
-                "dashboard": dashboard,
-            }),
-        }
-
-        # Clear callbacks
-        agent.stream_delta_callback = None
-        agent.tool_progress_callback = None
-        agent.status_callback = None
+        finally:
+            # Clear callbacks and return agent to pool
+            agent.stream_delta_callback = None
+            agent.tool_progress_callback = None
+            agent.status_callback = None
+            await agent_lease.__aexit__(None, None, None)
 
     return EventSourceResponse(event_generator())
 
@@ -307,9 +344,11 @@ async def health():
     return {
         "status": "ok",
         "service": "hermes-agent",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "model": HERMES_MODEL,
-        "agent_ready": _agent is not None,
+        "pool_size": AGENT_POOL_SIZE,
+        "pool_ready": _pool_initialized,
+        "pool_available": _agent_pool.qsize() if _pool_initialized else 0,
     }
 
 
@@ -318,7 +357,8 @@ async def health():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info("Starting Hermes Service v0.4.0 on port %s", HERMES_PORT)
+    logger.info("Starting Hermes Service v0.5.0 on port %s", HERMES_PORT)
     logger.info("Model: %s @ %s", HERMES_MODEL, HERMES_BASE_URL)
+    logger.info("Agent pool size: %d", AGENT_POOL_SIZE)
     logger.info("MCP URL: %s", MCP_URL)
     uvicorn.run(app, host="0.0.0.0", port=HERMES_PORT, log_level="info")

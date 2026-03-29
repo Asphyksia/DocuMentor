@@ -72,6 +72,7 @@ services:
       HERMES_MODEL: ${HERMES_MODEL:-qwen/qwen3-235b-a22b}
       HERMES_BASE_URL: ${HERMES_BASE_URL:-https://openrouter.ai/api/v1}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
+      HERMES_POOL_SIZE: ${HERMES_POOL_SIZE:-3}
       MCP_URL: http://mcp-wrapper:8000/mcp/
     depends_on:
       mcp-wrapper:
