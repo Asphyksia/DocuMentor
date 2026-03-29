@@ -9,8 +9,10 @@ import {
   ChevronRight,
   FolderOpen,
   Loader2,
+  Upload,
 } from "lucide-react";
 import clsx from "clsx";
+import { Skeleton } from "@/components/ui/skeleton";
 
 import type { DocItem } from "../hooks/useDocumentsState";
 
@@ -43,6 +45,60 @@ function formatDate(iso?: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Skeleton loader
+// ---------------------------------------------------------------------------
+
+function SidebarSkeleton() {
+  return (
+    <div className="space-y-2 px-1">
+      {[1, 2, 3, 4].map((i) => (
+        <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+          <Skeleton className="w-4 h-4 rounded" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-[75%]" />
+            <Skeleton className="h-2.5 w-[40%]" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state
+// ---------------------------------------------------------------------------
+
+function EmptyState({ onUploadClick }: { onUploadClick: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ delay: 0.1 }}
+      className="text-center py-10 px-4"
+    >
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50 mb-3">
+        <Upload className="w-5 h-5 text-muted-foreground" />
+      </div>
+      <p className="text-sm font-medium text-foreground/80 mb-1">
+        No documents yet
+      </p>
+      <p className="text-xs text-muted-foreground mb-4">
+        Upload your first file to get started
+      </p>
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={onUploadClick}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Upload document
+      </motion.button>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -54,18 +110,18 @@ export default function DocSidebar({
   isLoading,
 }: Props) {
   return (
-    <aside className="w-64 h-full bg-gray-950 text-gray-200 flex flex-col border-r border-gray-800">
+    <aside className="w-64 h-full bg-background flex flex-col border-r border-border">
       {/* Header */}
       <div className="px-4 pt-5 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <FolderOpen className="w-5 h-5 text-blue-400" />
-          <span className="font-semibold text-sm text-white">Documents</span>
+          <FolderOpen className="w-5 h-5 text-primary" />
+          <span className="font-semibold text-sm">Documents</span>
         </div>
         <motion.button
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.95 }}
           onClick={onUploadClick}
-          className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 transition-colors"
+          className="p-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground transition-colors"
           title="Upload document"
         >
           <Plus className="w-4 h-4" />
@@ -74,21 +130,10 @@ export default function DocSidebar({
 
       {/* Document list */}
       <div className="flex-1 overflow-y-auto px-2 pb-4">
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="w-5 h-5 text-gray-500 animate-spin" />
-          </div>
-        )}
+        {isLoading && <SidebarSkeleton />}
 
         {!isLoading && documents.length === 0 && (
-          <div className="text-center py-8 px-4">
-            <File className="w-8 h-8 text-gray-700 mx-auto mb-2" />
-            <p className="text-xs text-gray-500">
-              No documents yet.
-              <br />
-              Upload your first file to get started.
-            </p>
-          </div>
+          <EmptyState onUploadClick={onUploadClick} />
         )}
 
         <AnimatePresence mode="popLayout">
@@ -104,8 +149,8 @@ export default function DocSidebar({
               className={clsx(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group",
                 activeDocId === doc.id
-                  ? "bg-blue-600/20 text-white"
-                  : "hover:bg-gray-800/60 text-gray-300"
+                  ? "bg-primary/15 text-foreground"
+                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
               )}
             >
               {doc.status === "ready" ? (
@@ -115,7 +160,9 @@ export default function DocSidebar({
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-sm truncate">{doc.title}</p>
-                <p className="text-[10px] text-gray-500">{formatDate(doc.created_at)}</p>
+                <p className="text-[10px] text-muted-foreground">
+                  {formatDate(doc.created_at)}
+                </p>
               </div>
               <ChevronRight
                 className={clsx(
@@ -129,7 +176,7 @@ export default function DocSidebar({
       </div>
 
       {/* Footer stats */}
-      <div className="px-4 py-3 border-t border-gray-800 text-[10px] text-gray-600">
+      <div className="px-4 py-3 border-t border-border text-[10px] text-muted-foreground">
         {documents.length} document{documents.length !== 1 ? "s" : ""}
       </div>
     </aside>

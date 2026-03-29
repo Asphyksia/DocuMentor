@@ -201,6 +201,17 @@ export default function Home() {
     bridge.clearHistory();
   }, [chat, bridge]);
 
+  // --- Retry handler ---
+  const handleRetry = useCallback(() => {
+    const query = chat.popErrorForRetry();
+    if (!query) return;
+
+    chat.setIsQuerying(true);
+    chat.addUserMessage(query);
+    chat.addLoadingAgent();
+    bridge.query(query, docs.activeSpaceId);
+  }, [chat, bridge, docs.activeSpaceId]);
+
   // --- Doc selection ---
   const handleSelectDoc = useCallback(
     (doc: DocItem) => {
@@ -221,6 +232,7 @@ export default function Home() {
             onInputChange={chat.setInput}
             onSend={handleSend}
             onClearHistory={handleClearHistory}
+            onRetry={handleRetry}
             isQuerying={chat.isQuerying}
             agentStatus={agentStatus}
           />

@@ -10,6 +10,7 @@ export interface ChatMessage {
   timestamp: number;
   isLoading?: boolean;
   isStreaming?: boolean;
+  isError?: boolean;
   dashboard?: DashboardData;
   filename?: string;
 }
@@ -18,7 +19,7 @@ const WELCOME: ChatMessage = {
   id: "welcome",
   role: "agent",
   content:
-    "Hello! I'm DocuMentor, your university document assistant. Upload a document or ask me anything about your indexed files.",
+    "Hello! I'm DocuMentor, your document analysis assistant. Upload a document or ask me anything about your indexed files.",
   timestamp: Date.now(),
 };
 
@@ -27,9 +28,11 @@ export function useChatState() {
   const [input, setInput] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const streamingContentRef = useRef("");
+  const lastQueryRef = useRef<string | null>(null);
 
   const addUserMessage = useCallback((content: string): string => {
     const id = Date.now().toString();
+    lastQueryRef.current = content;
     setMessages((prev) => [
       ...prev,
       { id, role: "user", content, timestamp: Date.now() },
@@ -42,7 +45,14 @@ export function useChatState() {
     streamingContentRef.current = "";
     setMessages((prev) => [
       ...prev,
-      { id, role: "agent", content: "", isLoading: true, filename, timestamp: Date.now() },
+      {
+        id,
+        role: "agent",
+        content: "",
+        isLoading: true,
+        filename,
+        timestamp: Date.now(),
+      },
     ]);
     return id;
   }, []);
@@ -101,7 +111,6 @@ export function useChatState() {
           return updated;
         }
         // No pending message — attach dashboard to the last agent message
-        // (happens when streaming already finalized the text)
         if (dashboard) {
           for (let i = prev.length - 1; i >= 0; i--) {
             if (prev[i].role === "agent" && !prev[i].dashboard) {
@@ -122,15 +131,51 @@ export function useChatState() {
     setMessages((prev) =>
       prev.map((m) =>
         (m.isLoading || m.isStreaming) && m.role === "agent"
-          ? { ...m, isLoading: false, isStreaming: false, content: `Something went wrong: ${errorMessage}` }
+          ? {
+              ...m,
+              isLoading: false,
+              isStreaming: false,
+              isError: true,
+              content: errorMessage,
+            }
           : m
       )
     );
     setIsQuerying(false);
   }, []);
 
+  /**
+   * Remove the last error message pair (user query + error response)
+   * and return the original query text for retry.
+   */
+  const popErrorForRetry = useCallback((): string | null => {
+    const query = lastQueryRef.current;
+    if (!query) return null;
+
+    setMessages((prev) => {
+      // Find the last error message
+      const errorIdx = prev.findLastIndex(
+        (m) => m.role === "agent" && m.isError
+      );
+      if (errorIdx === -1) return prev;
+
+      // Remove the error + the user message before it
+      const userIdx = errorIdx > 0 && prev[errorIdx - 1].role === "user"
+        ? errorIdx - 1
+        : -1;
+
+      const updated = prev.filter(
+        (_, i) => i !== errorIdx && i !== userIdx
+      );
+      return updated;
+    });
+
+    return query;
+  }, []);
+
   const clearHistory = useCallback(() => {
     streamingContentRef.current = "";
+    lastQueryRef.current = null;
     setMessages([WELCOME]);
     setInput("");
     setIsQuerying(false);
@@ -150,6 +195,7 @@ export function useChatState() {
     finalizeStream,
     resolveAgent,
     resolveAgentError,
+    popErrorForRetry,
     clearHistory,
     clearInput,
   };
@@ -158,7 +204,10 @@ export function useChatState() {
 // Helper: find the index of the last agent message (loading or streaming)
 function findLastAgentIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "agent" && (messages[i].isLoading || messages[i].isStreaming)) {
+    if (
+      messages[i].role === "agent" &&
+      (messages[i].isLoading || messages[i].isStreaming)
+    ) {
       return i;
     }
   }
