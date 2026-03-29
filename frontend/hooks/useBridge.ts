@@ -6,6 +6,7 @@ import type {
   InboundMessage,
   ConnectionState,
 } from "../types/bridge";
+import { getAuthenticatedWsUrl } from "./useAuth";
 
 // ---------------------------------------------------------------------------
 // Public types (re-exported for convenience)
@@ -58,7 +59,7 @@ export function useBridge() {
       setBridgeState("connecting");
       setLastError(null);
 
-      const ws = new WebSocket(BRIDGE_URL);
+      const ws = new WebSocket(getAuthenticatedWsUrl(BRIDGE_URL));
 
       ws.onopen = () => {
         if (!mountedRef.current || wsRef.current !== ws) {

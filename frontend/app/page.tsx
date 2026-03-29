@@ -8,7 +8,9 @@ import ChatPanel from "../components/ChatPanel";
 import UploadModal from "../components/UploadModal";
 import SettingsPanel from "../components/SettingsPanel";
 import DashboardRenderer from "../DashboardRenderer";
+import LoginForm from "../components/LoginForm";
 import { useBridge } from "../hooks/useBridge";
+import { useAuth } from "../hooks/useAuth";
 import { useChatState } from "../hooks/useChatState";
 import { useDashboardState } from "../hooks/useDashboardState";
 import { useDocumentsState, type DocItem } from "../hooks/useDocumentsState";
@@ -28,6 +30,9 @@ const DEFAULT_SPACE_ID = parseInt(
 // ---------------------------------------------------------------------------
 
 export default function Home() {
+  // --- Auth ---
+  const auth = useAuth();
+
   // --- Hooks ---
   const bridge = useBridge();
   const chat = useChatState();
@@ -37,6 +42,25 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
+
+  // --- Auth gate ---
+  if (auth.state === "checking") {
+    return (
+      <div className="h-screen flex items-center justify-center bg-background">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-muted-foreground text-sm"
+        >
+          Loading...
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (auth.state === "unauthenticated" && auth.authEnabled) {
+    return <LoginForm onLogin={auth.login} error={auth.error} />;
+  }
 
   // --- Bridge message dispatcher ---
   useEffect(() => {

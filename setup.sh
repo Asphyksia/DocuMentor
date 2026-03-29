@@ -140,8 +140,15 @@ done
 
 echo ""
 
-# SurfSense password
-echo -e "Choose a ${CYAN}password${NC} for your document vault."
+# Login credentials
+echo -e "Choose ${CYAN}login credentials${NC} for DocuMentor."
+echo -e "  (This protects your instance from unauthorized access)"
+echo ""
+
+read -rp "  Email [admin@documenter.local]: " AUTH_EMAIL_INPUT
+AUTH_EMAIL="${AUTH_EMAIL_INPUT:-admin@documenter.local}"
+echo -e "  ${GREEN}✓${NC} Email: $AUTH_EMAIL"
+
 while true; do
     read -rsp "  Password (min 8 characters): " VAULT_PASSWORD
     echo ""
@@ -234,6 +241,11 @@ MCP_PORT=8000
 
 # Bridge
 BRIDGE_PORT=8001
+
+# Authentication
+DOCUMENTER_AUTH=true
+DOCUMENTER_EMAIL=${AUTH_EMAIL}
+DOCUMENTER_PASSWORD=${VAULT_PASSWORD}
 ${HERMES_SECTION}
 
 # Dashboard

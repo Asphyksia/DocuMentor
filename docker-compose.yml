@@ -103,6 +103,10 @@ services:
       MCP_URL: http://mcp-wrapper:8000
       BRIDGE_PORT: "8001"
       HERMES_URL: http://hermes:8002
+      DOCUMENTER_AUTH: ${DOCUMENTER_AUTH:-true}
+      DOCUMENTER_EMAIL: ${DOCUMENTER_EMAIL:-admin@documenter.local}
+      DOCUMENTER_PASSWORD: ${DOCUMENTER_PASSWORD:-}
+      SECRET_KEY: ${SECRET_KEY:-}
     depends_on:
       mcp-wrapper:
         condition: service_healthy

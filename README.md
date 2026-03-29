@@ -191,6 +191,9 @@ All variables from `.env.example`:
 | `SURFSENSE_PASSWORD` | ✅ | — | SurfSense login password |
 | `MCP_PORT` | — | `8000` | MCP wrapper port |
 | `BRIDGE_PORT` | — | `8001` | Bridge WebSocket port |
+| `DOCUMENTER_AUTH` | — | `true` | Enable/disable login authentication |
+| `DOCUMENTER_EMAIL` | — | `admin@documenter.local` | Login email |
+| `DOCUMENTER_PASSWORD` | ✅ | — | Login password (min 8 chars) |
 | `HERMES_API_KEY` | ✅* | — | OpenRouter key for Hermes (*only if using Hermes) |
 | `HERMES_BASE_URL` | — | `https://openrouter.ai/api/v1` | Hermes LLM endpoint |
 | `HERMES_MODEL` | — | `qwen/qwen3-235b-a22b` | Model for Hermes Agent |

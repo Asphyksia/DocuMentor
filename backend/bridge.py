@@ -46,14 +46,25 @@ import os
 import re
 import tempfile
 import time
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
+
+from auth import (
+    create_token,
+    is_auth_enabled,
+    validate_login,
+    validate_ws_token,
+    _check_config as auth_check_config,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -103,6 +114,7 @@ class ErrorCode:
     UPLOAD_TOO_LARGE = "UPLOAD_TOO_LARGE"
     UPLOAD_DECODE_FAILED = "UPLOAD_DECODE_FAILED"
     RATE_LIMITED = "RATE_LIMITED"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 # ---------------------------------------------------------------------------
@@ -153,7 +165,7 @@ class SearchDocumentsPayload(BaseModel):
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="DocuMentor Bridge", version="0.5.0")
+app = FastAPI(title="DocuMentor Bridge", version="0.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -162,6 +174,106 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=1, max_length=254)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+@app.post("/auth/login")
+async def auth_login(body: LoginRequest):
+    """Authenticate user and return JWT token."""
+    token = validate_login(body.email, body.password)
+    if not token:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid credentials"},
+        )
+
+    response = JSONResponse(content={
+        "ok": True,
+        "token": token,
+        "auth_enabled": is_auth_enabled(),
+    })
+    # Set httpOnly cookie for WebSocket auth
+    response.set_cookie(
+        key="documenter_token",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=24 * 3600,
+        path="/",
+    )
+    return response
+
+
+@app.get("/auth/check")
+async def auth_check(request: Request):
+    """Check if current session is authenticated."""
+    if not is_auth_enabled():
+        return {"authenticated": True, "auth_enabled": False}
+
+    token = _extract_token_from_request(request)
+    if token and validate_ws_token(token):
+        return {"authenticated": True, "auth_enabled": True}
+
+    return JSONResponse(
+        status_code=401,
+        content={"authenticated": False, "auth_enabled": True},
+    )
+
+
+@app.post("/auth/logout")
+async def auth_logout():
+    """Clear auth cookie."""
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie("documenter_token", path="/")
+    return response
+
+
+def _extract_token_from_request(request: Request) -> Optional[str]:
+    """Extract JWT from Authorization header or cookie."""
+    # Try Authorization header
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:]
+
+    # Try cookie
+    token = request.cookies.get("documenter_token")
+    if token:
+        return token
+
+    return None
+
+
+def _extract_ws_token(ws: WebSocket) -> Optional[str]:
+    """Extract JWT from WebSocket handshake (cookie or query param)."""
+    # Try cookie header
+    cookie_header = None
+    for header_name, header_value in ws.headers.raw:
+        if header_name == b"cookie":
+            cookie_header = header_value.decode()
+            break
+
+    if cookie_header:
+        cookie = SimpleCookie()
+        cookie.load(cookie_header)
+        if "documenter_token" in cookie:
+            return cookie["documenter_token"].value
+
+    # Try query param (?token=...)
+    query_string = ws.scope.get("query_string", b"").decode()
+    params = parse_qs(query_string)
+    token_list = params.get("token", [])
+    if token_list:
+        return token_list[0]
+
+    return None
 
 # ---------------------------------------------------------------------------
 # Connected clients & conversation history
@@ -792,6 +904,13 @@ MAX_WS_MESSAGE_SIZE = 75 * 1024 * 1024  # 75 MB (base64 overhead for 50MB files)
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    # Auth check before accepting
+    if is_auth_enabled():
+        token = _extract_ws_token(ws)
+        if not token or not validate_ws_token(token):
+            await ws.close(code=4001, reason="Authentication required")
+            return
+
     await ws.accept()
     active_connections.add(ws)
     logger.info("Client connected (%d total)", len(active_connections))
@@ -884,10 +1003,11 @@ async def health():
     return {
         "status": "ok",
         "service": "documenter-bridge",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "clients": len(active_connections),
         "hermes": _hermes_available or False,
         "hermes_url": HERMES_URL,
+        "auth_enabled": is_auth_enabled(),
         "cors_origins": ALLOWED_ORIGINS,
         "rate_limit": f"{RATE_LIMIT_MAX}/{RATE_LIMIT_WINDOW}s",
     }
@@ -909,7 +1029,10 @@ async def shutdown():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info("Starting DocuMentor Bridge v0.5.0 on port %s", BRIDGE_PORT)
+    logger.info("Starting DocuMentor Bridge v0.6.0 on port %s", BRIDGE_PORT)
+    logger.info("Auth: %s", "enabled" if is_auth_enabled() else "disabled")
+    for issue in auth_check_config():
+        logger.warning("Auth config: %s", issue)
     logger.info("CORS origins: %s", ALLOWED_ORIGINS)
     logger.info("Rate limit: %d requests per %ds window", RATE_LIMIT_MAX, RATE_LIMIT_WINDOW)
     logger.info("MCP wrapper: %s", MCP_BASE)
