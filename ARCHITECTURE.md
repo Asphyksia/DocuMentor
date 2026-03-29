@@ -1,15 +1,15 @@
 # Architecture
 
-> Last updated: 2026-03-26
+> Last updated: 2026-03-30 (v0.6.0)
 
 ## What DocuMentor is
 
 DocuMentor is an **intelligent document analysis platform** for universities that connects:
 
 1. **SurfSense** — document ingestion, chunking, embedding, hybrid search
-2. **Hermes Agent** — AI reasoning with tool-use capabilities (dedicated container)
+2. **Hermes Agent** — AI reasoning with tool-use capabilities (dedicated container, pooled)
 3. **MCP Wrapper** — 25 tools exposing SurfSense as MCP protocol
-4. **Bridge** — WebSocket gateway with streaming and conversation management
+4. **Bridge** — WebSocket gateway with auth, streaming, and conversation management
 5. **Dashboard** — Next.js web UI with real-time chat, visualizations, and document management
 
 DocuMentor does **not** implement its own:
@@ -21,96 +21,77 @@ DocuMentor does **not** implement its own:
 ## System diagram
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    User's Browser                        │
-│  Next.js dashboard (:3000)                               │
-│  Chat (streaming) · Documents · Dashboard · Settings     │
-└──────────────────────┬──────────────────────────────────┘
-                       │ WebSocket (ws://localhost:8001/ws)
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│            Bridge Server (:8001) — v0.5.0                │
-│  FastAPI + WebSocket                                     │
-│                                                          │
-│  Queries ──→ Hermes Service (:8002) via HTTP/SSE         │
-│              ├── SSE event: delta → ws stream             │
-│              ├── SSE event: tool → agent_status           │
-│              └── SSE event: done → result + dashboard     │
-│              (auto-fallback to direct MCP if Hermes down)│
-│                                                          │
-│  CRUD ────→ MCP Wrapper (direct JSON-RPC)                │
-│  (upload, delete, list, create_space, extract, search)   │
-│                                                          │
-│  11 typed handlers · Pydantic validation                 │
-│  Per-connection conversation history                     │
-│  CORS restricted · Rate limiting (30 req/min)            │
-└──────────┬────────────────────────┬─────────────────────┘
-           │                        │ HTTP / JSON-RPC
-           │                        │
-┌──────────▼──────────────────────┐ │
-│   Hermes Service (:8002)         │ │
-│   FastAPI + SSE streaming        │ │
-│                                  │ │
-│   AIAgent (Nous Research)        │ │
-│   - Reasoning + tool selection   │ │
-│   - MCP tool calls ─────────────┼─┼──→ MCP Wrapper
-│   - System prompt: DocuMentor    │ │
-│   - ThreadPoolExecutor (sync→async) │
-└──────────────────────────────────┘ │
-                                     │
-┌────────────────────────────────────▼────────────────────┐
-│         MCP Wrapper (:8000) — v1.0.0                     │
-│  Dual protocol:                                          │
-│  /mcp/    — Streamable HTTP (for Hermes, Claude Desktop) │
-│  /jsonrpc — JSON-RPC plain (for Bridge direct calls)     │
-│  /health  — Health check                                 │
-│                                                          │
-│  25 tools: query, upload, list, delete, extract,         │
-│  search, spaces, threads, status, settings...            │
-│                                                          │
-│  JWT auth with TTL + auto-retry on 401                   │
-│  Connection pooling (httpx.AsyncClient)                  │
-└──────────────────────┬──────────────────────────────────┘
-                       │ REST API
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│         SurfSense (:8929)                                │
-│  Document ingestion, chunking, embedding                 │
-│  Hybrid search (semantic + keyword)                      │
-│  Thread-based chat with SSE streaming                    │
-│  ┌──────────────┐  ┌───────────┐  ┌──────────────┐     │
-│  │ PostgreSQL   │  │ Redis     │  │ Celery       │     │
-│  │ + pgvector   │  │ (queue)   │  │ (workers)    │     │
-│  └──────────────┘  └───────────┘  └──────────────┘     │
-└──────────────────────┬──────────────────────────────────┘
-                       │ HTTP (OpenAI-compatible)
-                       │
-┌──────────────────────▼──────────────────────────────────┐
-│         LLM Provider                                     │
-│  RelayGPU, OpenRouter, OpenAI, Ollama, etc.             │
-│  Configured via .env (OPENAI_API_KEY + OPENAI_BASE_URL) │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                  User's Browser                       │
+│  Next.js dashboard (:3000)                            │
+│  Chat · Dashboard · Document Manager · Settings       │
+│  Theme toggle · Persistent history · Responsive UI    │
+└────────────────────────┬─────────────────────────────┘
+                         │ WebSocket (JWT auth)
+                         ▼
+                  ┌──────────────┐
+                  │ Bridge :8001 │
+                  │ WebSocket GW │
+                  │  v0.6.0      │
+                  └──┬────────┬──┘
+                     │        │
+            Queries  │        │  CRUD (upload,
+           (HTTP/SSE)│        │  delete, list)
+                     ▼        │
+       ┌──────────────┐       │
+       │ Hermes :8002 │       │
+       │  AI Agent    │       │
+       │ (pool x3)    │       │
+       └──┬────────┬──┘       │
+          │        │          │
+          │    MCP tool calls │
+          ▼        │          ▼
+    ┌──────────┐   │  ┌──────────────┐
+    │   LLM    │   └─>│ MCP Wrapper  │
+    │ Provider │      │   :8000      │
+    │(RelayGPU)│      │  25 tools    │
+    └──────────┘      └──────┬───────┘
+                             │ REST API
+                             ▼
+                      ┌──────────────┐
+                      │  SurfSense   │
+                      │    :8929     │
+                      │ Hybrid search│
+                      │ Docling ETL  │
+                      │ pgvector     │
+                      └──────────────┘
 ```
 
-## How queries flow (v0.5.0 — Hermes as service)
+**Key data flows:**
+- **Hermes → LLM Provider**: Reasoning, response generation, tool-call decisions
+- **Hermes → MCP Wrapper**: Tool calls to search/query documents
+- **Bridge → MCP Wrapper**: Direct CRUD operations (no LLM needed)
+- **MCP Wrapper → SurfSense**: Document search, upload, indexing, extraction
+- SurfSense does **not** call the LLM — it handles RAG (search + embeddings) only
+
+## How queries flow (v0.6.0)
 
 ```
 1. User types question in chat
 2. Frontend sends: { type: "query", payload: { query, search_space_id } }
 3. Bridge checks Hermes availability (GET /health)
 4. If Hermes available:
-   a. Bridge POSTs query + conversation history to Hermes service (/query)
-   b. Hermes service returns SSE stream
-   c. Bridge forwards SSE events to WebSocket:
+   a. Bridge POSTs query + conversation history to Hermes (/query)
+   b. Hermes leases an agent from the pool (async, non-blocking)
+   c. Agent reasons about the query, decides which tools to call
+   d. Agent calls LLM Provider for reasoning/generation
+   e. Agent calls MCP Wrapper tools for document search/retrieval
+   f. Hermes streams SSE events back to Bridge:
       - event: delta → { type: "stream", delta: "..." }
       - event: tool  → { type: "agent_status", tool: "..." }
       - event: done  → { type: "result", dashboard: {...} }
-   d. Hermes internally calls MCP tools on mcp-wrapper
-   e. Bridge stores updated conversation history
+   g. Agent returned to pool after completion
+   h. Bridge stores updated conversation history
 5. If Hermes unavailable (fallback):
    a. Bridge calls MCP wrapper directly via JSON-RPC (surfsense_query)
    b. Returns result without AI reasoning
 6. Frontend renders streamed text + dashboard visualizations
+7. Chat history persisted to localStorage
 ```
 
 ## How uploads flow
@@ -126,15 +107,29 @@ DocuMentor does **not** implement its own:
 8. Bridge polls surfsense_document_status every 2s (max 60s)
 9. Once ready, Bridge calls surfsense_extract_tables
 10. Bridge sends dashboard JSON to frontend
-11. Frontend renders via DashboardRenderer
+11. Frontend renders via DashboardRenderer + toast notification
+```
+
+## Authentication flow (v0.6.0)
+
+```
+1. User visits DocuMentor → /auth/check (cookie-based)
+2. If unauthenticated → Login screen (email + password)
+3. POST /auth/login → validates against DOCUMENTER_EMAIL/PASSWORD (.env)
+4. Returns JWT token (HMAC-SHA256, 24h TTL)
+   - Set as httpOnly cookie (primary auth)
+   - Stored in sessionStorage (WebSocket fallback)
+5. WebSocket connects with token (cookie or ?token= query param)
+6. Bridge validates JWT on handshake, rejects 4001 if invalid
+7. DOCUMENTER_AUTH=false disables auth entirely (dev mode)
 ```
 
 ## Docker services
 
 | Service | Port | Container | Role |
 |---|---|---|---|
-| **bridge** | 8001 | `Dockerfile.bridge` | WebSocket gateway, query routing |
-| **hermes** | 8002 | `hermes-service/Dockerfile` | AI reasoning + MCP tool use |
+| **bridge** | 8001 | `Dockerfile.bridge` | WebSocket gateway, auth, query routing |
+| **hermes** | 8002 | `hermes-service/Dockerfile` | AI reasoning, agent pool, MCP tool use |
 | **mcp-wrapper** | 8000 | `Dockerfile.mcp` | 25 MCP tools over SurfSense |
 | **surfsense-backend** | 8929 | (from SurfSense) | RAG, search, doc processing |
 | **postgres** | 5432 | (from SurfSense) | Data + pgvector |
@@ -144,8 +139,9 @@ DocuMentor does **not** implement its own:
 
 | Component | Owner | Location |
 |---|---|---|
-| Bridge server (v0.5.0) | **DocuMentor** | `backend/bridge.py` |
-| Hermes HTTP wrapper | **DocuMentor** | `hermes-service/server.py` |
+| Bridge server (v0.6.0) | **DocuMentor** | `backend/bridge.py` |
+| Auth module | **DocuMentor** | `backend/auth.py` |
+| Hermes HTTP wrapper (v0.5.0) | **DocuMentor** | `hermes-service/server.py` |
 | MCP wrapper (v1.0.0) | **DocuMentor** | `surfsense-skill/mcp_server.py` |
 | Frontend UI | **DocuMentor** | `frontend/` |
 | Dashboard schemas | **DocuMentor** | `DOCSTEMPLATES.md` |
@@ -160,29 +156,30 @@ DocuMentor does **not** implement its own:
    the model's ability to return valid JSON. The frontend handles malformed
    data gracefully with fallback rendering.
 
-2. **Single-user design**: No authentication, no RBAC, no multi-tenancy.
-   SurfSense uses a single admin account configured in .env.
+2. **Single-user design**: One installation = one user. Auth is access
+   control (email/password from .env), not multi-tenancy.
 
 3. **Base64 uploads**: Files are encoded in-browser. The bridge enforces 50MB
    and frees memory after decode, but large files spike RAM temporarily.
 
-4. **Concurrent queries**: Hermes service uses a singleton AIAgent with
-   ThreadPoolExecutor (4 workers). Heavy concurrent load may queue.
+4. **No offline processing**: All queries require a live LLM provider.
 
-5. **No offline processing**: All queries require a live LLM provider.
-
-6. **SurfSense API contract**: The MCP wrapper assumes specific API shapes.
+5. **SurfSense API contract**: The MCP wrapper assumes specific API shapes.
    The submodule is pinned to a specific commit to mitigate breakage.
 
 ## Security model
 
+- **Authentication**: JWT tokens (HMAC-SHA256), httpOnly cookies, 24h TTL.
+  WebSocket handshake validates token. Configurable via `DOCUMENTER_AUTH`.
 - **Network boundary**: All services on localhost / Docker internal network.
   Exposed ports: frontend (:3000), bridge WebSocket (:8001).
 - **CORS**: Restricted to configured origins (default: localhost:3000).
 - **Rate limiting**: 30 requests per 60s per WebSocket connection.
 - **No generic passthrough**: 11 typed handlers, each Pydantic-validated.
-- **Upload validation**: Filename sanitized, size enforced, temp files cleaned.
-- **JWT tokens**: Cached 55min TTL, auto-refreshed, retry once on 401.
+- **Upload validation**: Filename sanitized, size enforced, temp files cleaned
+  on startup and after each upload.
+- **Preflight checks**: Bridge validates env vars, auth config, upload dir
+  writability, and service URLs at startup.
 - **Hermes isolation**: `skip_context_files=True`, `skip_memory=True` —
   no personal context leaks into document queries.
 - **Inter-service**: Bridge ↔ Hermes ↔ MCP Wrapper communicate over Docker
@@ -193,39 +190,49 @@ DocuMentor does **not** implement its own:
 ```
 DocuMentor/
 ├── backend/
-│   ├── bridge.py              ← WebSocket gateway + Hermes HTTP client
-│   ├── Dockerfile.bridge      ← Bridge container (lightweight)
-│   ├── Dockerfile.mcp         ← MCP wrapper container
+│   ├── bridge.py              ← WebSocket gateway + auth + Hermes client
+│   ├── auth.py                ← JWT auth (zero external deps)
+│   ├── Dockerfile.bridge
+│   ├── Dockerfile.mcp
 │   └── requirements.txt
 ├── hermes-service/
-│   ├── server.py              ← HTTP/SSE wrapper for AIAgent
-│   ├── Dockerfile             ← Hermes container (with all agent deps)
+│   ├── server.py              ← HTTP/SSE wrapper, agent pool
+│   ├── Dockerfile
 │   ├── hermes-config.yaml     ← MCP config (Docker internal URLs)
 │   └── requirements.txt
 ├── frontend/
-│   ├── app/page.tsx           ← Main page (wiring)
+│   ├── app/
+│   │   ├── page.tsx           ← Main page (auth gate, routing, wiring)
+│   │   ├── layout.tsx         ← Root layout (ThemeProvider, Toaster)
+│   │   └── globals.css        ← shadcn CSS variables (oklch)
 │   ├── components/
-│   │   ├── ChatPanel.tsx      ← Chat with streaming support
-│   │   ├── AppHeader.tsx
-│   │   ├── DocSidebar.tsx
-│   │   ├── SettingsPanel.tsx
+│   │   ├── ui/                ← shadcn components (CLI-managed)
+│   │   ├── AppHeader.tsx      ← Header + tabs + connection banner
+│   │   ├── ChatPanel.tsx      ← Chat with streaming, retry, copy
+│   │   ├── DocSidebar.tsx     ← Documents + search + skeletons
+│   │   ├── LoginForm.tsx      ← Auth login screen
+│   │   ├── ErrorBoundary.tsx  ← React error boundary
+│   │   ├── SettingsPanel.tsx  ← Settings + system info + theme
 │   │   └── UploadModal.tsx
 │   ├── hooks/
-│   │   ├── useBridge.ts       ← WebSocket client
-│   │   ├── useChatState.ts    ← Chat state with streaming
+│   │   ├── useAuth.ts         ← Auth state + login/logout
+│   │   ├── useBridge.ts       ← WebSocket client (auth-aware)
+│   │   ├── useChatState.ts    ← Chat + localStorage persistence
 │   │   ├── useDashboardState.ts
 │   │   ├── useDocumentsState.ts
 │   │   └── useUploadState.ts
 │   ├── types/bridge.ts        ← Protocol types (discriminated unions)
-│   └── DashboardRenderer.tsx  ← JSON → visual dashboard
+│   ├── DashboardRenderer.tsx  ← JSON → visual dashboard
+│   └── components.json        ← shadcn CLI config
 ├── surfsense-skill/           ← MCP server (own repo, submodule)
 │   └── mcp_server.py         ← 25 tools, dual protocol
 ├── hermes-agent/              ← AI agent source (submodule)
 ├── docs/                      ← Audit reports, improvement plans
 ├── docker-compose.yml
+├── setup.sh                   ← Interactive first-time setup
 ├── .env.example
-├── hermes-config.example.yaml ← MCP config template (local dev)
 ├── ARCHITECTURE.md            ← This file
-├── HERMES_INTEGRATION_PLAN.md ← Integration phases
+├── DEVELOPMENT_PLAN.md        ← Phased roadmap
+├── DOCSTEMPLATES.md           ← Dashboard JSON schemas
 └── README.md
 ```
