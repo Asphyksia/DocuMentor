@@ -17,6 +17,7 @@ import { useDashboardState } from "../hooks/useDashboardState";
 import { useDocumentsState, type DocItem } from "../hooks/useDocumentsState";
 import { useUploadState } from "../hooks/useUploadState";
 import type { InboundMessage, DashboardData } from "../types/bridge";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -116,6 +117,7 @@ export default function Home() {
               p.filename
             );
             if (p.doc_id) docs.setActiveDocId(p.doc_id);
+            toast.success(`${p.filename ?? "File"} uploaded successfully`);
           }
 
           if (p.action === "query" && p.dashboard) {
@@ -137,6 +139,14 @@ export default function Home() {
           if (p.action === "extract" && p.dashboard) {
             dash.updateDashboard(p.dashboard as DashboardData);
           }
+
+          if (p.action === "delete_document") {
+            toast.success("Document deleted");
+          }
+
+          if (p.action === "delete_space") {
+            toast.success("Space deleted");
+          }
           break;
         }
 
@@ -150,11 +160,13 @@ export default function Home() {
 
         case "space_created":
           bridge.listSpaces();
+          toast.success("Space created");
           break;
 
         case "error":
           chat.resolveAgentError(msg.payload.message);
           setAgentStatus(null);
+          toast.error(msg.payload.message ?? "Something went wrong");
           break;
       }
     });
@@ -170,6 +182,35 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge.bridgeState, docs.activeSpaceId]);
+
+  // --- Keyboard shortcuts ---
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const mod = e.ctrlKey || e.metaKey;
+
+      // Ctrl+U — open upload modal
+      if (mod && e.key === "u") {
+        e.preventDefault();
+        upload.openModal();
+      }
+
+      // Ctrl+N — new chat
+      if (mod && e.key === "n" && !e.shiftKey) {
+        e.preventDefault();
+        chat.clearHistory();
+        setAgentStatus(null);
+        bridge.clearHistory();
+      }
+
+      // Escape — close upload modal
+      if (e.key === "Escape" && upload.showModal) {
+        upload.closeModal();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [chat, bridge, upload, setAgentStatus]);
 
   // --- Upload handler ---
   const handleUpload = useCallback(
@@ -219,6 +260,17 @@ export default function Home() {
       setActiveTab("dashboard");
     },
     [docs]
+  );
+
+  // --- Doc deletion ---
+  const handleDeleteDoc = useCallback(
+    (docId: number) => {
+      bridge.deleteDocument(docId, docs.activeSpaceId);
+      if (docs.activeDocId === docId) {
+        docs.setActiveDocId(null);
+      }
+    },
+    [bridge, docs]
   );
 
   // --- Tab content ---
@@ -283,6 +335,7 @@ export default function Home() {
               documents={docs.documents}
               activeDocId={docs.activeDocId}
               onSelectDoc={handleSelectDoc}
+              onDeleteDoc={handleDeleteDoc}
               onUploadClick={upload.openModal}
               isLoading={docs.docsLoading}
             />

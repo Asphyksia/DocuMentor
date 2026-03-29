@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -10,9 +11,20 @@ import {
   FolderOpen,
   Loader2,
   Upload,
+  Trash2,
 } from "lucide-react";
 import clsx from "clsx";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 import type { DocItem } from "../hooks/useDocumentsState";
 
@@ -22,6 +34,7 @@ type Props = {
   documents: DocItem[];
   activeDocId: number | null;
   onSelectDoc: (doc: DocItem) => void;
+  onDeleteDoc?: (docId: number) => void;
   onUploadClick: () => void;
   isLoading: boolean;
 };
@@ -106,11 +119,43 @@ export default function DocSidebar({
   documents,
   activeDocId,
   onSelectDoc,
+  onDeleteDoc,
   onUploadClick,
   isLoading,
 }: Props) {
+  const [deleteTarget, setDeleteTarget] = useState<DocItem | null>(null);
+
   return (
     <aside className="w-64 h-full bg-background flex flex-col border-r border-border">
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteTarget?.title}</strong> will be permanently removed.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteTarget && onDeleteDoc) {
+                  onDeleteDoc(deleteTarget.id);
+                }
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Header */}
       <div className="px-4 pt-5 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -164,12 +209,25 @@ export default function DocSidebar({
                   {formatDate(doc.created_at)}
                 </p>
               </div>
-              <ChevronRight
-                className={clsx(
-                  "w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity",
-                  activeDocId === doc.id && "opacity-60"
-                )}
-              />
+              {onDeleteDoc ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteTarget(doc);
+                  }}
+                  className="w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:bg-destructive/20 hover:text-destructive transition-all"
+                  title="Delete"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              ) : (
+                <ChevronRight
+                  className={clsx(
+                    "w-3 h-3 opacity-0 group-hover:opacity-60 transition-opacity",
+                    activeDocId === doc.id && "opacity-60"
+                  )}
+                />
+              )}
             </motion.button>
           ))}
         </AnimatePresence>
