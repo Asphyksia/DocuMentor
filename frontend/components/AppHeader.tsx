@@ -9,6 +9,7 @@ import {
   WifiOff,
   Loader2,
   FileText,
+  Menu,
 } from "lucide-react";
 import clsx from "clsx";
 import type { BridgeState, SystemStatus } from "../hooks/useBridge";
@@ -24,6 +25,7 @@ type Props = {
   onTabChange: (tab: TabId) => void;
   bridgeState: BridgeState;
   systemStatus: SystemStatus;
+  onToggleSidebar?: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -132,12 +134,21 @@ export default function AppHeader({
   onTabChange,
   bridgeState,
   systemStatus,
+  onToggleSidebar,
 }: Props) {
   return (
     <header className="bg-background border-b border-border">
       <div className="h-14 flex items-center justify-between px-4">
-        {/* Logo */}
+        {/* Logo + mobile menu */}
         <div className="flex items-center gap-3">
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="lg:hidden p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg shadow-primary/20">
             <FileText className="w-4 h-4 text-primary-foreground" />
           </div>

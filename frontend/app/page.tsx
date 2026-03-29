@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import clsx from "clsx";
 import AppHeader, { type TabId } from "../components/AppHeader";
 import DocSidebar from "../components/DocSidebar";
 import ChatPanel from "../components/ChatPanel";
@@ -44,6 +45,7 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState<TabId>("chat");
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // --- Auth gate ---
   if (auth.state === "checking") {
@@ -328,19 +330,42 @@ export default function Home() {
           onTabChange={setActiveTab}
           bridgeState={bridge.bridgeState}
           systemStatus={bridge.systemStatus}
+          onToggleSidebar={() => setSidebarOpen((v) => !v)}
         />
 
-        <div className="flex-1 flex overflow-hidden">
-          <ErrorBoundary fallbackMessage="Error loading document sidebar">
-            <DocSidebar
-              documents={docs.documents}
-              activeDocId={docs.activeDocId}
-              onSelectDoc={handleSelectDoc}
-              onDeleteDoc={handleDeleteDoc}
-              onUploadClick={upload.openModal}
-              isLoading={docs.docsLoading}
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Mobile sidebar overlay */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 bg-black/50 z-30 lg:hidden"
+              onClick={() => setSidebarOpen(false)}
             />
-          </ErrorBoundary>
+          )}
+
+          {/* Sidebar: hidden on mobile by default, always visible on desktop */}
+          <div
+            className={clsx(
+              "absolute lg:relative z-40 lg:z-auto h-full transition-transform duration-200 lg:translate-x-0",
+              sidebarOpen ? "translate-x-0" : "-translate-x-full"
+            )}
+          >
+            <ErrorBoundary fallbackMessage="Error loading document sidebar">
+              <DocSidebar
+                documents={docs.documents}
+                activeDocId={docs.activeDocId}
+                onSelectDoc={(doc) => {
+                  handleSelectDoc(doc);
+                  setSidebarOpen(false);
+                }}
+                onDeleteDoc={handleDeleteDoc}
+                onUploadClick={() => {
+                  upload.openModal();
+                  setSidebarOpen(false);
+                }}
+                isLoading={docs.docsLoading}
+              />
+            </ErrorBoundary>
+          </div>
 
           <main className="flex-1 overflow-hidden">
             <ErrorBoundary fallbackMessage="Error rendering content">

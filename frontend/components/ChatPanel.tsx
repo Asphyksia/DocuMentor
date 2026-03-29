@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, forwardRef } from "react";
+import { useRef, useEffect, forwardRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send,
@@ -12,6 +12,8 @@ import {
   AlertCircle,
   MessageSquare,
   Upload,
+  Copy,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
 import { Button } from "@/components/ui/button";
@@ -91,6 +93,15 @@ const MessageBubble = forwardRef<
   { msg: ChatMessage; onRetry?: () => void }
 >(function MessageBubble({ msg, onRetry }, ref) {
   const isUser = msg.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!msg.content) return;
+    navigator.clipboard.writeText(msg.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   return (
     <motion.div
@@ -98,7 +109,7 @@ const MessageBubble = forwardRef<
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
-      className={clsx("flex gap-3", isUser ? "justify-end" : "justify-start")}
+      className={clsx("flex gap-3 group", isUser ? "justify-end" : "justify-start")}
     >
       {/* Avatar */}
       {!isUser && (
@@ -154,6 +165,21 @@ const MessageBubble = forwardRef<
             </span>
           )}
         </motion.div>
+
+        {/* Copy button (agent messages only, when content exists) */}
+        {!isUser && !msg.isLoading && !msg.isStreaming && msg.content && (
+          <button
+            onClick={handleCopy}
+            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+            title="Copy to clipboard"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5 text-green-500" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
 
         {/* Retry button on error */}
         {msg.isError && onRetry && (
