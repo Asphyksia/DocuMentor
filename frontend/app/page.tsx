@@ -9,6 +9,7 @@ import UploadModal from "../components/UploadModal";
 import SettingsPanel from "../components/SettingsPanel";
 import DashboardRenderer from "../DashboardRenderer";
 import LoginForm from "../components/LoginForm";
+import ErrorBoundary from "../components/ErrorBoundary";
 import { useBridge } from "../hooks/useBridge";
 import { useAuth } from "../hooks/useAuth";
 import { useChatState } from "../hooks/useChatState";
@@ -255,46 +256,52 @@ export default function Home() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 text-gray-100 overflow-hidden">
-      <AppHeader
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        bridgeState={bridge.bridgeState}
-        systemStatus={bridge.systemStatus}
-      />
-
-      <div className="flex-1 flex overflow-hidden">
-        <DocSidebar
-          documents={docs.documents}
-          activeDocId={docs.activeDocId}
-          onSelectDoc={handleSelectDoc}
-          onUploadClick={upload.openModal}
-          isLoading={docs.docsLoading}
+    <ErrorBoundary>
+      <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
+        <AppHeader
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          bridgeState={bridge.bridgeState}
+          systemStatus={bridge.systemStatus}
         />
 
-        <main className="flex-1 overflow-hidden">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              transition={{ duration: 0.2 }}
-              className="h-full"
-            >
-              {renderTab()}
-            </motion.div>
-          </AnimatePresence>
-        </main>
-      </div>
+        <div className="flex-1 flex overflow-hidden">
+          <ErrorBoundary fallbackMessage="Error loading document sidebar">
+            <DocSidebar
+              documents={docs.documents}
+              activeDocId={docs.activeDocId}
+              onSelectDoc={handleSelectDoc}
+              onUploadClick={upload.openModal}
+              isLoading={docs.docsLoading}
+            />
+          </ErrorBoundary>
 
-      <UploadModal
-        isOpen={upload.showModal}
-        onClose={upload.closeModal}
-        onUpload={handleUpload}
-        status={upload.status}
-        statusMessage={upload.message}
-      />
-    </div>
+          <main className="flex-1 overflow-hidden">
+            <ErrorBoundary fallbackMessage="Error rendering content">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="h-full"
+                >
+                  {renderTab()}
+                </motion.div>
+              </AnimatePresence>
+            </ErrorBoundary>
+          </main>
+        </div>
+
+        <UploadModal
+          isOpen={upload.showModal}
+          onClose={upload.closeModal}
+          onUpload={handleUpload}
+          status={upload.status}
+          statusMessage={upload.message}
+        />
+      </div>
+    </ErrorBoundary>
   );
 }

@@ -1016,6 +1016,23 @@ async def health():
 # Lifecycle
 # ---------------------------------------------------------------------------
 
+@app.on_event("startup")
+async def startup():
+    """Clean stale temp files from previous runs."""
+    upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/documenter-uploads")
+    if os.path.isdir(upload_dir):
+        stale = 0
+        for f in os.listdir(upload_dir):
+            if f.startswith("documenter-"):
+                try:
+                    os.unlink(os.path.join(upload_dir, f))
+                    stale += 1
+                except OSError:
+                    pass
+        if stale:
+            logger.info("Cleaned %d stale temp files from %s", stale, upload_dir)
+
+
 @app.on_event("shutdown")
 async def shutdown():
     global _mcp_client, _hermes_client
@@ -1028,11 +1045,41 @@ async def shutdown():
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _preflight_checks() -> list[str]:
+    """Validate environment before starting. Returns list of warnings."""
+    warnings = []
+
+    # Auth config
+    for issue in auth_check_config():
+        warnings.append(f"[auth] {issue}")
+
+    # MCP URL sanity
+    if not MCP_BASE.startswith("http"):
+        warnings.append(f"[mcp] MCP_URL looks invalid: {MCP_BASE}")
+
+    # Hermes URL sanity
+    if not HERMES_URL.startswith("http"):
+        warnings.append(f"[hermes] HERMES_URL looks invalid: {HERMES_URL}")
+
+    # Upload dir writable
+    upload_dir = os.environ.get("UPLOAD_DIR", "/tmp/documenter-uploads")
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        test_file = os.path.join(upload_dir, ".write-test")
+        with open(test_file, "w") as f:
+            f.write("ok")
+        os.unlink(test_file)
+    except OSError as e:
+        warnings.append(f"[upload] Upload dir not writable ({upload_dir}): {e}")
+
+    return warnings
+
+
 if __name__ == "__main__":
     logger.info("Starting DocuMentor Bridge v0.6.0 on port %s", BRIDGE_PORT)
     logger.info("Auth: %s", "enabled" if is_auth_enabled() else "disabled")
-    for issue in auth_check_config():
-        logger.warning("Auth config: %s", issue)
+    for w in _preflight_checks():
+        logger.warning("Preflight: %s", w)
     logger.info("CORS origins: %s", ALLOWED_ORIGINS)
     logger.info("Rate limit: %d requests per %ds window", RATE_LIMIT_MAX, RATE_LIMIT_WINDOW)
     logger.info("MCP wrapper: %s", MCP_BASE)
