@@ -35,8 +35,7 @@ Thumbs.db
 postgres_data/
 redis_data/
 
-# SurfSense source (pulled as Docker image, not needed in repo)
-SurfSense/
+# SurfSense is now a git submodule (required for docker-compose)
 
 # Temporary files
 *.tmp
